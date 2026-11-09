@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from .builder import build_base64_config, build_clash_config, build_singbox_config
+from .builder import build_base64_config, build_clash_config, build_singbox_config, extract_dynamic_groups
 from .db import get_db
 from .models import Node, Setting, Source
 from .parsers.clash import extract_subscription_extra_info
@@ -287,7 +287,7 @@ async def refresh_source(source_id: int, db: AsyncSession = Depends(get_db)):
 
 # ==================== 节点池大盘 API ====================
 
-@router.get("/api/nodes", summary="获取合并后的节点池列表")
+@router.get("/api/nodes", summary="获取合并后的节点池与聚合动态策略组")
 async def list_nodes(db: AsyncSession = Depends(get_db)):
     stmt = (
         select(Node, Source.name.label("source_name"))
@@ -298,8 +298,9 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
     rows = result.all()
 
     nodes = []
+    raw_nodes_for_dyn = []
     for n, s_name in rows:
-        nodes.append({
+        node_dict = {
             "id": n.id,
             "source_id": n.source_id,
             "source_name": s_name,
@@ -311,8 +312,17 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
             "country_code": n.country_code,
             "country_flag": n.country_flag,
             "is_residential": n.is_residential
-        })
-    return {"total": len(nodes), "nodes": nodes}
+        }
+        nodes.append(node_dict)
+        raw_nodes_for_dyn.append(node_dict)
+
+    dynamic_groups = extract_dynamic_groups(raw_nodes_for_dyn)
+
+    return {
+        "total": len(nodes),
+        "dynamic_groups": dynamic_groups,
+        "nodes": nodes
+    }
 
 @router.get("/health")
 async def health_check():

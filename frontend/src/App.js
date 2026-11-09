@@ -19,6 +19,7 @@ export default {
   setup() {
     const sources = ref([]);
     const nodes = ref([]);
+    const dynamicGroups = ref([]);
     const syncing = ref(false);
     const refreshingIds = ref([]);
     const selectedTarget = ref('clash');
@@ -56,6 +57,7 @@ export default {
         if (res.ok) {
           const data = await res.json();
           nodes.value = data.nodes || [];
+          dynamicGroups.value = data.dynamic_groups || [];
         }
       } catch (e) {
         console.error('Failed to load nodes', e);
@@ -164,6 +166,7 @@ export default {
     return {
       sources,
       nodes,
+      dynamicGroups,
       syncing,
       refreshingIds,
       selectedTarget,
@@ -208,8 +211,8 @@ export default {
         </div>
       </div>
 
-      <!-- 底部：合并节点池大盘 -->
-      <NodePool :nodes="nodes" />
+      <!-- 底部：合并节点池大盘 (聚合动态策略组 + 物理透传平铺，支持折叠) -->
+      <NodePool :nodes="nodes" :dynamic-groups="dynamicGroups" />
 
       <!-- 设置与添加源模态弹窗 -->
       <SettingsModal 

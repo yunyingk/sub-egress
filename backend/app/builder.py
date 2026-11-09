@@ -31,6 +31,90 @@ DEFAULT_RULES = [
     "MATCH,PROXY"
 ]
 
+DYNAMIC_REGIONS = [
+    ("HK", "🇭🇰", "港区", "香港最佳低延迟"),
+    ("JP", "🇯🇵", "日区", "日本最佳低延迟"),
+    ("SG", "🇸🇬", "狮城", "新加坡最佳低延迟"),
+    ("TW", "🇹🇼", "台区", "台湾最佳低延迟"),
+    ("US", "🇺🇸", "美区", "美国最佳低延迟"),
+    ("KR", "🇰🇷", "韩区", "韩国最佳低延迟"),
+    ("GB", "🇬🇧", "英区", "英国最佳低延迟"),
+    ("DE", "🇩🇪", "德区", "德国最佳低延迟"),
+]
+
+
+def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    根据接入的可用物理节点，自动计算带边界的聚合动态策略组 (URL-Test / Fallback)。
+    既用于下发配置文件生成，也用于提供给 Web 仪表盘清晰展示。
+    """
+    if not raw_nodes:
+        return []
+
+    pass_through_names = [item.get("display_name") for item in raw_nodes if item.get("display_name")]
+    by_country: Dict[str, List[str]] = {}
+    residential_names: List[str] = []
+
+    for item in raw_nodes:
+        name = item.get("display_name")
+        if not name:
+            continue
+        cc = (item.get("country_code") or "OTHER").upper()
+        by_country.setdefault(cc, []).append(name)
+        if item.get("is_residential"):
+            residential_names.append(name)
+
+    groups = []
+
+    # 1. 重点地区同国巡检低延迟动态组 (绝不跨区乱跳)
+    for code, flag, short_name, desc in DYNAMIC_REGIONS:
+        node_names = by_country.get(code, [])
+        if node_names:
+            groups.append({
+                "name": f"[动态·{short_name}] {flag} {desc}",
+                "type": "url-test",
+                "strategy": "同国低延迟自动优选",
+                "country_code": code,
+                "country_flag": flag,
+                "node_count": len(node_names),
+                "proxies": list(node_names),
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
+                "tolerance": 50
+            })
+
+    # 2. 纯净美国家宽住宅智能主备组 (绝不混入机房IP)
+    if residential_names:
+        groups.append({
+            "name": "[动态·家宽] 🇺🇸 美国住宅智能主备",
+            "type": "fallback",
+            "strategy": "纯净住宅IP主备容灾",
+            "country_code": "US",
+            "country_flag": "🇺🇸",
+            "node_count": len(residential_names),
+            "proxies": list(residential_names),
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 50
+        })
+
+    # 3. 全网全局兜底容灾组
+    if pass_through_names:
+        groups.append({
+            "name": "[动态·全局] 🌐 全网故障转移",
+            "type": "url-test",
+            "strategy": "全网跨区故障转移兜底",
+            "country_code": "ALL",
+            "country_flag": "🌐",
+            "node_count": len(pass_through_names),
+            "proxies": list(pass_through_names),
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 100
+        })
+
+    return groups
+
 
 def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
     """
@@ -51,65 +135,30 @@ def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
 
     proxies_list: List[Dict[str, Any]] = []
     pass_through_names: List[str] = []
-    japan_node_names: List[str] = []
-    residential_node_names: List[str] = []
 
     for item in raw_nodes:
         node_cfg = copy.deepcopy(item.get("config_json", {}))
         display_name = item.get("display_name")
-        country_code = item.get("country_code", "OTHER")
-        is_res = item.get("is_residential", False)
-
         node_cfg["name"] = display_name
         proxies_list.append(node_cfg)
         pass_through_names.append(display_name)
 
-        if country_code == "JP":
-            japan_node_names.append(display_name)
-        if is_res:
-            residential_node_names.append(display_name)
+    dyn_groups = extract_dynamic_groups(raw_nodes)
+    dynamic_options = [g["name"] for g in dyn_groups]
+    proxy_groups = []
+    for g in dyn_groups:
+        grp = {
+            "name": g["name"],
+            "type": g["type"],
+            "proxies": g["proxies"],
+            "url": g["url"],
+            "interval": g["interval"],
+        }
+        if "tolerance" in g:
+            grp["tolerance"] = g["tolerance"]
+        proxy_groups.append(grp)
 
-    proxy_groups: List[Dict[str, Any]] = []
-    dynamic_options: List[str] = []
-
-    # 1. 动态·日区 (同国巡检，绝不换区)
-    if japan_node_names:
-        jp_dyn_name = "[动态·日区] 🇯🇵 日本最佳低延迟"
-        proxy_groups.append({
-            "name": jp_dyn_name,
-            "type": "url-test",
-            "proxies": list(japan_node_names),
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300,
-            "tolerance": 50
-        })
-        dynamic_options.append(jp_dyn_name)
-
-    # 2. 动态·家宽 (仅限住宅IP主备，绝不换区)
-    if residential_node_names:
-        res_dyn_name = "[动态·家宽] 🇺🇸 美国住宅智能主备"
-        proxy_groups.append({
-            "name": res_dyn_name,
-            "type": "fallback",
-            "proxies": list(residential_node_names),
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": 300
-        })
-        dynamic_options.append(res_dyn_name)
-
-    # 3. 动态·全局 (全网兜底容灾)
-    global_dyn_name = "[动态·全局] 🌐 全网故障转移"
-    proxy_groups.append({
-        "name": global_dyn_name,
-        "type": "url-test",
-        "proxies": list(pass_through_names),
-        "url": "http://www.gstatic.com/generate_204",
-        "interval": 300,
-        "tolerance": 100
-    })
-    dynamic_options.append(global_dyn_name)
-
-    # 4. 主选择器 PROXY: 动态置顶 + 平铺全部透传节点
+    # 主选择器 PROXY: 动态策略组置顶 + 全部透传节点平铺
     main_selector_proxies = [*dynamic_options, *pass_through_names]
     main_selector = {
         "name": "PROXY",
@@ -218,47 +267,21 @@ def build_singbox_config(raw_nodes: List[Dict[str, Any]]) -> str:
         if outbound:
             outbounds.append(outbound)
             pass_through_tags.append(tag)
-            if country_code == "JP":
-                japan_tags.append(tag)
-            if is_res:
-                residential_tags.append(tag)
 
-    # 动态组
+    # 动态组 (使用统一的 extract_dynamic_groups)
+    dyn_groups = extract_dynamic_groups(raw_nodes)
     group_outbounds: List[Dict[str, Any]] = []
     dyn_tags: List[str] = []
 
-    if japan_tags:
-        jp_dyn = "[动态·日区] 🇯🇵 日本最佳低延迟"
+    for g in dyn_groups:
+        dyn_tags.append(g["name"])
         group_outbounds.append({
             "type": "urltest",
-            "tag": jp_dyn,
-            "outbounds": japan_tags,
-            "url": "http://www.gstatic.com/generate_204",
+            "tag": g["name"],
+            "outbounds": g["proxies"],
+            "url": g["url"],
             "interval": "5m"
         })
-        dyn_tags.append(jp_dyn)
-
-    if residential_tags:
-        res_dyn = "[动态·家宽] 🇺🇸 美国住宅智能主备"
-        group_outbounds.append({
-            "type": "urltest",
-            "tag": res_dyn,
-            "outbounds": residential_tags,
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": "5m"
-        })
-        dyn_tags.append(res_dyn)
-
-    if pass_through_tags:
-        global_dyn = "[动态·全局] 🌐 全网故障转移"
-        group_outbounds.append({
-            "type": "urltest",
-            "tag": global_dyn,
-            "outbounds": pass_through_tags,
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": "5m"
-        })
-        dyn_tags.append(global_dyn)
 
     # 主选择器 PROXY
     proxy_selector = {
