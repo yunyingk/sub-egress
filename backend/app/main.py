@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="sub-egress",
     description="出站网关与订阅聚合调度中枢",
-    version="0.2.13",
+    version="0.2.14",
     lifespan=lifespan
 )
 

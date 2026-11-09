@@ -11,8 +11,12 @@ DEFAULT_DNS_CONFIG = {
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
     "use-hosts": True,
-    "respect-rules": True,
     "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+    "proxy-server-nameserver": [
+        "223.5.5.5",
+        "119.29.29.29",
+        "https://doh.pub/dns-query"
+    ],
     "nameserver": [
         "223.5.5.5",
         "119.29.29.29",
@@ -258,9 +262,7 @@ def build_clash_config(
 
     terminal_group = {
         "name": "终端-日本",
-        "type": "fallback",
-        "url": "https://www.gstatic.com/generate_204",
-        "interval": 60,
+        "type": "select",
         "proxies": terminal_jp_proxies
     }
 

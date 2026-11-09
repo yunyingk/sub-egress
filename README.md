@@ -1,7 +1,7 @@
 # sub-egress · 出站网关与多内核订阅调度中枢
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.13-blue.svg" alt="version">
+  <img src="https://img.shields.io/badge/version-0.2.14-blue.svg" alt="version">
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="python">
   <img src="https://img.shields.io/badge/framework-FastAPI-009688.svg" alt="FastAPI">
   <img src="https://img.shields.io/badge/database-PostgreSQL%20%7C%20SQLite-336791.svg" alt="Database">
