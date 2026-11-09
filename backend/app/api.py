@@ -1,8 +1,10 @@
+import base64
 from datetime import datetime
 import os
 from pathlib import Path
 import secrets
 from typing import Any, Dict, List, Optional
+import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -21,7 +23,8 @@ DEFAULT_SETTINGS = {
     "require_token": "false",
     "default_target": "clash",
     "update_interval": "12",
-    "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+    "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+    "subscription_title": "sub-egress 出站聚合中枢"
 }
 
 async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
@@ -120,10 +123,17 @@ async def export_subscription(
         media_type = "application/yaml; charset=utf-8"
         filename = "sub-egress-clash.yaml"
 
+    sub_title = settings.get("subscription_title", "sub-egress 出站聚合中枢")
+    b64_title = "base64:" + base64.b64encode(sub_title.encode("utf-8")).decode("utf-8")
+    encoded_fn = urllib.parse.quote(f"{sub_title}.yaml" if final_target == "clash" else filename)
+
     headers = {
         "Content-Type": media_type,
-        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_fn}',
+        "profile-title": b64_title,
+        "subscription-title": b64_title,
         "profile-update-interval": interval,
+        "profile-web-page-url": "https://sub.ying-qing.cn",
     }
     if total_max > 0:
         headers["subscription-userinfo"] = f"upload=0; download={total_used}; total={total_max}; expire={earliest_expire}"
@@ -139,6 +149,7 @@ class SettingsPayload(BaseModel):
     default_target: Optional[str] = None
     update_interval: Optional[str] = None
     write_api_token: Optional[str] = None
+    subscription_title: Optional[str] = None
 
 @router.get("/api/settings", summary="获取全局读写与安全设置")
 async def get_settings(db: AsyncSession = Depends(get_db)):
@@ -148,7 +159,8 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "require_token": settings.get("require_token", "false").lower() == "true",
         "default_target": settings.get("default_target", "clash"),
         "update_interval": settings.get("update_interval", "12"),
-        "write_api_token": settings.get("write_api_token", "")
+        "write_api_token": settings.get("write_api_token", ""),
+        "subscription_title": settings.get("subscription_title", "sub-egress 出站聚合中枢")
     }
 
 @router.post("/api/settings", summary="保存全局读写设置")
@@ -164,6 +176,8 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
         updates["update_interval"] = payload.update_interval.strip()
     if payload.write_api_token is not None:
         updates["write_api_token"] = payload.write_api_token.strip()
+    if payload.subscription_title is not None:
+        updates["subscription_title"] = payload.subscription_title.strip()
 
     for k, v in updates.items():
         stmt = select(Setting).where(Setting.key == k)

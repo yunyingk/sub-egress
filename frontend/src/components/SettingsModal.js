@@ -86,6 +86,14 @@ export default {
             </label>
           </div>
 
+          <!-- 订阅卡片展示名称 (Profile Title) -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">客户端卡片订阅名称 (Profile Title)</label>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 mb-2">导入到 Clash Verge、Mihomo、Sing-box 客户端卡片顶部呈现的精致名称。</p>
+            <input v-model="editSettings.subscription_title" type="text" placeholder="例如: sub-egress 出站聚合中枢"
+                   class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+
           <!-- 默认导出内核 -->
           <div>
             <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">默认订阅内核类型 (Default Target)</label>
