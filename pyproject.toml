@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sub-egress"
+version = "0.2.0"
+description = "Modern outbound gateway and multi-core subscription aggregation hub with binary selector design"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "yunyingk" }
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy>=2.0.36",
+    "asyncpg>=0.30.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0.2",
+    "pydantic>=2.10.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0"
+]

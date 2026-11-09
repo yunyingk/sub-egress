@@ -1,33 +1,85 @@
 from datetime import datetime
+import secrets
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from .builder import build_clash_config
+from .builder import build_base64_config, build_clash_config, build_singbox_config
 from .db import get_db
-from .models import Node, Source
+from .models import Node, Setting, Source
 from .syncer import sync_single_source
 
 router = APIRouter()
 
-class SourceCreate(BaseModel):
-    name: str
-    url: str
-    source_type: Optional[str] = "auto"
-    raw_content: Optional[str] = None
+DEFAULT_SETTINGS = {
+    "sub_hash_token": "e699ffd91845385075b27d813b8590df40375c6af2c4eb77",
+    "require_token": "false",
+    "default_target": "clash",
+    "update_interval": "12",
+    "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+}
 
-class SourceUpdate(BaseModel):
-    name: Optional[str] = None
-    url: Optional[str] = None
-    enabled: Optional[bool] = None
-    raw_content: Optional[str] = None
+async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
+    stmt = select(Setting)
+    res = await db.execute(stmt)
+    db_settings = {s.key: s.value for s in res.scalars().all()}
+    
+    # Fill in any missing default settings
+    merged = dict(DEFAULT_SETTINGS)
+    missing = []
+    for k, v in DEFAULT_SETTINGS.items():
+        if k in db_settings:
+            merged[k] = db_settings[k]
+        else:
+            missing.append(Setting(key=k, value=v))
+    
+    if missing:
+        for s in missing:
+            db.add(s)
+        await db.commit()
+    return merged
 
-# ==================== 下游订阅分发端点 (供客户端直连) ====================
+# ==================== 下游订阅分发端点 (供客户端直连与多内核分发) ====================
 
+@router.get("/c/{token}", summary="基于哈希令牌的统一下游订阅")
+@router.get("/sub/{token}", summary="兼容 Sub-Store 哈希订阅")
+@router.get("/sub/{token}/{name}/{sub_target}", summary="兼容 Sub-Store 级联端点")
 @router.get("/clash", summary="获取合并后的完整 ClashMeta 配置")
 @router.get("/download/clash")
-async def export_clash_config(db: AsyncSession = Depends(get_db)):
+@router.get("/download/collection/{collection_name}")
+@router.get("/download/collection/{collection_name}/{sub_target}")
+@router.get("/export")
+@router.get("/feed")
+async def export_subscription(
+    token: Optional[str] = None,
+    sub_target: Optional[str] = None,
+    target: Optional[str] = Query(None, description="目标内核: clash, sing-box, base64"),
+    type: Optional[str] = Query(None, description="别名目标内核: clash, sing-box, base64"),
+    t: Optional[str] = Query(None, description="Query 传递的 token"),
+    db: AsyncSession = Depends(get_db)
+):
+    settings = await get_system_settings(db)
+    req_token = token or t
+    
+    # 读权限安全检查
+    if settings.get("require_token", "false").lower() == "true":
+        expected_token = settings.get("sub_hash_token", "")
+        if not req_token or req_token != expected_token:
+            raise HTTPException(
+                status_code=403,
+                detail="403 Forbidden: Invalid or missing subscription security hash token"
+            )
+
+    # 确定目标导出内核
+    raw_target = (target or type or sub_target or settings.get("default_target", "clash")).lower()
+    if raw_target in ("sing-box", "singbox", "sb"):
+        final_target = "sing-box"
+    elif raw_target in ("base64", "uri", "txt", "feed"):
+        final_target = "base64"
+    else:
+        final_target = "clash"
+
     # 提取所有启用的节点
     stmt = (
         select(Node, Source.name.label("source_name"))
@@ -48,8 +100,6 @@ async def export_clash_config(db: AsyncSession = Depends(get_db)):
             "config_json": node.config_json
         })
 
-    yaml_text = build_clash_config(raw_nodes)
-
     # 统计总流量与最早到期时间供客户端展示
     src_stmt = select(Source).where(Source.enabled == True)
     src_res = await db.execute(src_stmt)
@@ -59,18 +109,104 @@ async def export_clash_config(db: AsyncSession = Depends(get_db)):
     total_max = sum(s.traffic_total for s in sources if s.traffic_total)
     earliest_expire = min((int(s.expire_at.timestamp()) for s in sources if s.expire_at), default=0)
 
+    interval = settings.get("update_interval", "12")
+
+    if final_target == "sing-box":
+        content = build_singbox_config(raw_nodes)
+        media_type = "application/json; charset=utf-8"
+        filename = "sub-egress-singbox.json"
+    elif final_target == "base64":
+        content = build_base64_config(raw_nodes)
+        media_type = "text/plain; charset=utf-8"
+        filename = "sub-egress.txt"
+    else:
+        content = build_clash_config(raw_nodes)
+        media_type = "application/yaml; charset=utf-8"
+        filename = "sub-egress-clash.yaml"
+
     headers = {
-        "Content-Type": "application/yaml; charset=utf-8",
-        "Content-Disposition": 'inline; filename="sub-egress.yaml"',
-        "profile-update-interval": "12",
+        "Content-Type": media_type,
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "profile-update-interval": interval,
     }
     if total_max > 0:
         headers["subscription-userinfo"] = f"upload=0; download={total_used}; total={total_max}; expire={earliest_expire}"
 
-    return Response(content=yaml_text, media_type="application/yaml", headers=headers)
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
+# ==================== 读写设置 API ====================
+
+class SettingsPayload(BaseModel):
+    sub_hash_token: Optional[str] = None
+    require_token: Optional[bool] = None
+    default_target: Optional[str] = None
+    update_interval: Optional[str] = None
+    write_api_token: Optional[str] = None
+
+@router.get("/api/settings", summary="获取全局读写与安全设置")
+async def get_settings(db: AsyncSession = Depends(get_db)):
+    settings = await get_system_settings(db)
+    return {
+        "sub_hash_token": settings.get("sub_hash_token", ""),
+        "require_token": settings.get("require_token", "false").lower() == "true",
+        "default_target": settings.get("default_target", "clash"),
+        "update_interval": settings.get("update_interval", "12"),
+        "write_api_token": settings.get("write_api_token", "")
+    }
+
+@router.post("/api/settings", summary="保存全局读写设置")
+async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(get_db)):
+    updates = {}
+    if payload.sub_hash_token is not None:
+        updates["sub_hash_token"] = payload.sub_hash_token.strip()
+    if payload.require_token is not None:
+        updates["require_token"] = "true" if payload.require_token else "false"
+    if payload.default_target is not None:
+        updates["default_target"] = payload.default_target.strip().lower()
+    if payload.update_interval is not None:
+        updates["update_interval"] = payload.update_interval.strip()
+    if payload.write_api_token is not None:
+        updates["write_api_token"] = payload.write_api_token.strip()
+
+    for k, v in updates.items():
+        stmt = select(Setting).where(Setting.key == k)
+        res = await db.execute(stmt)
+        setting = res.scalar_one_or_none()
+        if setting:
+            setting.value = v
+        else:
+            db.add(Setting(key=k, value=v))
+    await db.commit()
+    return {"status": "success", "message": "Settings updated"}
+
+@router.post("/api/settings/regenerate-token", summary="重新生成安全哈希令牌")
+async def regenerate_token(db: AsyncSession = Depends(get_db)):
+    new_token = secrets.token_hex(24)
+    stmt = select(Setting).where(Setting.key == "sub_hash_token")
+    res = await db.execute(stmt)
+    setting = res.scalar_one_or_none()
+    if setting:
+        setting.value = new_token
+    else:
+        db.add(Setting(key="sub_hash_token", value=new_token))
+    await db.commit()
+    return {"status": "success", "new_token": new_token}
 
 
 # ==================== 上游源管理 API (供 Web 控制台) ====================
+
+class SourceCreate(BaseModel):
+    name: str
+    url: str
+    source_type: Optional[str] = "auto"
+    raw_content: Optional[str] = None
+
+class SourceUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+    raw_content: Optional[str] = None
 
 @router.get("/api/sources", summary="获取上游源列表")
 async def list_sources(db: AsyncSession = Depends(get_db)):
@@ -158,7 +294,7 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
     )
     result = await db.execute(stmt)
     rows = result.all()
-    
+
     nodes = []
     for n, s_name in rows:
         nodes.append({

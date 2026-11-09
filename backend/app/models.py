@@ -44,3 +44,12 @@ class Node(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     source = relationship("Source", back_populates="nodes")
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=False)
+    description = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
