@@ -5,6 +5,8 @@ import OutboundFeed from './components/OutboundFeed.js';
 import NodePool from './components/NodePool.js';
 import SettingsModal from './components/SettingsModal.js';
 import AddSourceModal from './components/AddSourceModal.js';
+import UserSecurityModal from './components/UserSecurityModal.js';
+import AdminPanel from './components/AdminPanel.js';
 
 export default {
   name: 'App',
@@ -14,9 +16,12 @@ export default {
     OutboundFeed,
     NodePool,
     SettingsModal,
-    AddSourceModal
+    AddSourceModal,
+    UserSecurityModal,
+    AdminPanel
   },
   setup() {
+    const currentUser = ref(null);
     const sources = ref([]);
     const nodes = ref([]);
     const dynamicGroups = ref([]);
@@ -24,25 +29,57 @@ export default {
     const refreshingIds = ref([]);
     const selectedTarget = ref('clash');
 
-    // 设置状态
+    // 模态弹窗状态
     const showSettingsModal = ref(false);
+    const showSecurityModal = ref(false);
+    const showAdminModal = ref(false);
+    const showAddModal = ref(false);
     const savingSettings = ref(false);
+    const creatingSource = ref(false);
+
     const settings = ref({
       sub_hash_token: 'e699ffd91845385075b27d813b8590df40375c6af2c4eb77',
       require_token: false,
       default_target: 'clash',
       update_interval: '12',
-      write_api_token: ''
+      write_api_token: '',
+      subscription_title: 'sub-egress',
+      clash_mixed_port: '7897',
+      clash_terminal_port: '7898'
     });
-
-    // 添加源状态
-    const showAddModal = ref(false);
-    const creatingSource = ref(false);
 
     // 服务端下发版本号
     const appVersion = computed(() => {
       return settings.value?.version ? `v${settings.value.version}` : '';
     });
+
+    // 鉴权与获取当前登录用户
+    const fetchCurrentUser = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          currentUser.value = await res.json();
+          // 同步用户专属的 Token 和配置
+          if (currentUser.value.sub_hash_token) {
+            settings.value.sub_hash_token = currentUser.value.sub_hash_token;
+          }
+          if (currentUser.value.subscription_title) {
+            settings.value.subscription_title = currentUser.value.subscription_title;
+          }
+          if (currentUser.value.clash_mixed_port) {
+            settings.value.clash_mixed_port = currentUser.value.clash_mixed_port;
+          }
+          if (currentUser.value.clash_terminal_port) {
+            settings.value.clash_terminal_port = currentUser.value.clash_terminal_port;
+          }
+        } else if (res.status === 401) {
+          // 未登录，自动重定向到独立登录页
+          window.location.href = '/login.html';
+        }
+      } catch (e) {
+        console.error('Failed to fetch user', e);
+      }
+    };
 
     // 数据加载
     const fetchSources = async () => {
@@ -74,7 +111,7 @@ export default {
         const res = await fetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
-          settings.value = data;
+          settings.value = { ...settings.value, ...data };
           if (data.default_target) {
             selectedTarget.value = data.default_target;
           }
@@ -154,6 +191,7 @@ export default {
             selectedTarget.value = newSettings.default_target;
           }
           showSettingsModal.value = false;
+          await fetchCurrentUser();
         }
       } catch (e) {
         console.error('Failed to save settings', e);
@@ -162,13 +200,22 @@ export default {
       }
     };
 
-    onMounted(() => {
+    const handleLogout = async () => {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) {}
+      window.location.href = '/login.html';
+    };
+
+    onMounted(async () => {
+      await fetchCurrentUser();
       fetchSources();
       fetchNodes();
       fetchSettings();
     });
 
     return {
+      currentUser,
       sources,
       nodes,
       dynamicGroups,
@@ -177,15 +224,19 @@ export default {
       selectedTarget,
       settings,
       showSettingsModal,
+      showSecurityModal,
+      showAdminModal,
       savingSettings,
       showAddModal,
       creatingSource,
       appVersion,
+      fetchCurrentUser,
       refreshAll,
       refreshSource,
       deleteSource,
       createSource,
-      saveSettings
+      saveSettings,
+      handleLogout
     };
   },
   template: `
@@ -193,8 +244,12 @@ export default {
       <Navbar 
         :version="appVersion"
         :syncing="syncing"
+        :current-user="currentUser"
         @open-settings="showSettingsModal = true" 
+        @open-security="showSecurityModal = true"
+        @open-admin="showAdminModal = true"
         @refresh-all="refreshAll" 
+        @logout="handleLogout"
       />
 
       <!-- 主工作区：上游数据源与下游分发中心 -->
@@ -235,6 +290,22 @@ export default {
         :creating="creatingSource"
         @close="showAddModal = false"
         @create="createSource"
+      />
+
+      <!-- 个人安全中心弹窗 (通行密钥与密码) -->
+      <UserSecurityModal 
+        :visible="showSecurityModal"
+        :user="currentUser"
+        @close="showSecurityModal = false"
+        @user-updated="fetchCurrentUser"
+      />
+
+      <!-- 管理员专属后台管理弹窗 -->
+      <AdminPanel 
+        v-if="currentUser && currentUser.role === 'admin'"
+        :visible="showAdminModal"
+        :current-admin="currentUser"
+        @close="showAdminModal = false"
       />
     </div>
   `

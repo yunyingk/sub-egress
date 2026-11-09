@@ -5,10 +5,51 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(64), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=True)
+    role = Column(String(32), default="user", nullable=False)  # admin / user
+    is_active = Column(Boolean, default=True, nullable=False)
+    sub_hash_token = Column(String(64), nullable=False, unique=True, index=True)
+    subscription_title = Column(String(128), default="sub-egress", nullable=False)
+    clash_mixed_port = Column(String(16), default="7897", nullable=False)
+    clash_terminal_port = Column(String(16), default="7898", nullable=False)
+    oauth_provider = Column(String(32), nullable=True)  # authentik / etc.
+    oauth_id = Column(String(128), nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    passkeys = relationship("PasskeyCredential", back_populates="user", cascade="all, delete-orphan")
+    sources = relationship("Source", back_populates="user")
+
+
+class PasskeyCredential(Base):
+    __tablename__ = "passkey_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    credential_id = Column(String(255), nullable=False, unique=True, index=True)
+    public_key = Column(Text, nullable=False)
+    sign_count = Column(Integer, default=0, nullable=False)
+    name = Column(String(64), default="我的通行密钥", nullable=False)
+    transports = Column(String(128), default="internal", nullable=True)
+    aaguid = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="passkeys")
+
+
 class Source(Base):
     __tablename__ = "sources"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_shared = Column(Boolean, default=True, nullable=False)
     name = Column(String(64), nullable=False, unique=True)
     code = Column(String(8), default="", nullable=True)
     url = Column(Text, nullable=False)
@@ -26,6 +67,8 @@ class Source(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     nodes = relationship("Node", back_populates="source", cascade="all, delete-orphan")
+    user = relationship("User", back_populates="sources")
+
 
 class Node(Base):
     __tablename__ = "nodes"
@@ -48,6 +91,7 @@ class Node(Base):
 
     source = relationship("Source", back_populates="nodes")
 
+
 class Setting(Base):
     __tablename__ = "settings"
 
@@ -55,4 +99,3 @@ class Setting(Base):
     value = Column(Text, nullable=False)
     description = Column(String(255), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-

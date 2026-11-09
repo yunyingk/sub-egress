@@ -7,9 +7,10 @@ export default {
   },
   props: {
     syncing: { type: Boolean, default: false },
-    version: { type: String, default: '' }
+    version: { type: String, default: '' },
+    currentUser: { type: Object, default: () => null }
   },
-  emits: ['openSettings', 'refreshAll'],
+  emits: ['openSettings', 'openSecurity', 'openAdmin', 'refreshAll', 'logout'],
   template: `
     <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 mb-8 border-b border-slate-200 dark:border-slate-800 gap-4">
       <div>
@@ -34,11 +35,27 @@ export default {
         <!-- 现代主流外观切换组件 (浅色 / 深色 / 跟随系统) -->
         <ThemeToggle />
 
+        <!-- 管理员专属后台管理页签 -->
+        <button v-if="currentUser && currentUser.role === 'admin'" 
+                @click="$emit('openAdmin')" 
+                class="px-3.5 py-2 text-sm font-medium rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/60 shadow-xs transition-all flex items-center gap-2">
+          <i class="fa-solid fa-users-gear text-purple-500"></i>
+          <span>用户管理</span>
+        </button>
+
+        <!-- 个人安全中心 (通行密钥与密码) -->
+        <button v-if="currentUser" 
+                @click="$emit('openSecurity')" 
+                class="px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-xs transition-all flex items-center gap-2">
+          <i class="fa-solid fa-fingerprint text-sky-500"></i>
+          <span class="hidden sm:inline">安全中心</span>
+        </button>
+
         <!-- 读写与安全设置 -->
         <button @click="$emit('openSettings')" 
                 class="px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-xs transition-all flex items-center gap-2">
           <i class="fa-solid fa-sliders text-sky-500"></i>
-          <span>读写设置</span>
+          <span>订阅参数</span>
         </button>
 
         <!-- API 文档 -->
@@ -54,6 +71,18 @@ export default {
           <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': syncing}"></i>
           <span>{{ syncing ? '正在同步...' : '全量刷新' }}</span>
         </button>
+
+        <!-- 用户名徽章与退出登录 -->
+        <div v-if="currentUser" class="flex items-center pl-2 border-l border-slate-200 dark:border-slate-700 gap-2">
+          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <i class="fa-regular fa-user text-slate-400"></i>
+            <span>{{ currentUser.username }}</span>
+          </div>
+          <button @click="$emit('logout')" title="退出登录" 
+                  class="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
       </div>
     </header>
   `

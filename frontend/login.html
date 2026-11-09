@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sub-egress · 身份认证中心</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="alternate icon" href="/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js"
+      }
+    }
+  </script>
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+  <script>
+    (function() {
+      try {
+        const savedMode = localStorage.getItem('sub_egress_theme_mode') || localStorage.getItem('sub_egress_theme') || 'system';
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (savedMode === 'dark' || (savedMode === 'system' && prefersDark)) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-screen flex items-center justify-center p-4 transition-colors duration-200">
+  <div id="app" class="w-full max-w-md">
+    <!-- 顶部品牌标志 -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-500 to-blue-600 shadow-lg shadow-sky-500/25 mb-4">
+        <i class="fa-solid fa-satellite-dish text-white text-2xl"></i>
+      </div>
+      <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">sub-egress 认证中心</h1>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">出站网关调度中枢 · 独立安全门户</p>
+    </div>
+
+    <!-- 登录主卡片 -->
+    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 md:p-8">
+      <!-- 模式切换 Tabs -->
+      <div class="flex border-b border-slate-200 dark:border-slate-700 mb-6">
+        <button @click="mode = 'login'" 
+                :class="{'border-sky-500 text-sky-600 dark:text-sky-400 font-semibold': mode === 'login', 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300': mode !== 'login'}"
+                class="flex-1 pb-3 text-sm text-center border-b-2 transition-all">
+          <i class="fa-solid fa-key mr-1.5"></i>账号密码
+        </button>
+        <button @click="mode = 'passkey'" 
+                :class="{'border-sky-500 text-sky-600 dark:text-sky-400 font-semibold': mode === 'passkey', 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300': mode !== 'passkey'}"
+                class="flex-1 pb-3 text-sm text-center border-b-2 transition-all">
+          <i class="fa-solid fa-fingerprint mr-1.5"></i>通行密钥
+        </button>
+        <button @click="mode = 'register'" 
+                :class="{'border-sky-500 text-sky-600 dark:text-sky-400 font-semibold': mode === 'register', 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300': mode !== 'register'}"
+                class="flex-1 pb-3 text-sm text-center border-b-2 transition-all">
+          <i class="fa-solid fa-user-plus mr-1.5"></i>新用户注册
+        </button>
+      </div>
+
+      <!-- 错误警告提示 -->
+      <div v-if="errorMessage" class="mb-5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5">
+        <i class="fa-solid fa-circle-exclamation text-rose-500 mt-0.5 shrink-0"></i>
+        <div class="flex-1 leading-relaxed">{{ errorMessage }}</div>
+      </div>
+
+      <!-- 成功提示 -->
+      <div v-if="successMessage" class="mb-5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 text-xs flex items-start gap-2.5">
+        <i class="fa-solid fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
+        <div class="flex-1 leading-relaxed">{{ successMessage }}</div>
+      </div>
+
+      <!-- 表单 1: 账号密码登录 -->
+      <form v-if="mode === 'login'" @submit.prevent="handlePasswordLogin" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            用户名 <span class="text-slate-400 font-normal">(小写字母与数字)</span>
+          </label>
+          <div class="relative">
+            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+              <i class="fa-regular fa-user"></i>
+            </span>
+            <input v-model="loginForm.username" @input="checkUsernameUppercase(loginForm.username)"
+                   type="text" required autocomplete="username" placeholder="请输入小写用户名"
+                   class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            密码 <span class="text-slate-400 font-normal">(20~260位，严禁大写字母)</span>
+          </label>
+          <div class="relative">
+            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+              <i class="fa-solid fa-lock"></i>
+            </span>
+            <input v-model="loginForm.password" @input="checkPasswordUppercase(loginForm.password)"
+                   :type="showPassword ? 'text' : 'password'" required autocomplete="current-password" placeholder="请输入全小写密码"
+                   class="w-full pl-9 pr-10 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+              <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" :disabled="loading"
+                class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2">
+          <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
+          <span>{{ loading ? '正在验证...' : '登 录' }}</span>
+        </button>
+      </form>
+
+      <!-- 表单 2: 通行密钥 (Passkey) 免密登录 -->
+      <div v-else-if="mode === 'passkey'" class="text-center py-4 space-y-5">
+        <div class="w-16 h-16 rounded-full bg-sky-100 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 mx-auto flex items-center justify-center text-2xl shadow-inner">
+          <i class="fa-solid fa-fingerprint"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-slate-800 dark:text-slate-100">通行密钥一键免密登录</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1.5 px-4 leading-relaxed">
+            支持当前域名的 Apple Touch ID / Face ID、Windows Hello 或 FIDO2 安全硬件密钥登录。
+          </p>
+        </div>
+
+        <button @click="handlePasskeyLogin" :disabled="loading"
+                class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white shadow-md shadow-sky-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+          <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
+          <i v-else class="fa-solid fa-shield-halved"></i>
+          <span>{{ loading ? '请触摸传感器或扫描...' : '调用通行密钥登录' }}</span>
+        </button>
+      </div>
+
+      <!-- 表单 3: 新用户自主注册 -->
+      <form v-else-if="mode === 'register'" @submit.prevent="handleRegister" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            设置用户名 <span class="text-slate-400 font-normal">(5~20位小写字母/数字)</span>
+          </label>
+          <input v-model="registerForm.username" @input="checkUsernameUppercase(registerForm.username)"
+                 type="text" required placeholder="例如: user01, dev-user"
+                 class="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            设置安全密码 <span class="text-slate-400 font-normal">(20~260位，严禁大写字母)</span>
+          </label>
+          <div class="relative">
+            <input v-model="registerForm.password" @input="checkPasswordUppercase(registerForm.password)"
+                   :type="showPassword ? 'text' : 'password'" required placeholder="小写字母 + 数字 + 符号"
+                   class="w-full pl-3 pr-10 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+              <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+            </button>
+          </div>
+          <div class="flex items-center justify-between mt-1 text-[11px] text-slate-400">
+            <span>当前长度: {{ registerForm.password.length }}/260</span>
+            <button type="button" @click="generatePasswordForRegister" class="text-sky-500 hover:underline">
+              <i class="fa-solid fa-wand-magic-sparkles mr-0.5"></i>自动生成 32 位安全密码
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" :disabled="loading"
+                class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2">
+          <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
+          <span>{{ loading ? '正在注册...' : '立即注册' }}</span>
+        </button>
+      </form>
+
+      <!-- 底部显性第三方 SSO 登录入口 -->
+      <div class="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
+        <p class="text-center text-xs text-slate-400 mb-3">或者通过第三方统一身份认证</p>
+        <a href="/" 
+           class="w-full py-2.5 px-4 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all flex items-center justify-center gap-2">
+          <i class="fa-solid fa-id-card-clip text-sky-500"></i>
+          <span>使用 Authentik 单点登录 (SSO)</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createApp, ref, reactive, onMounted } from 'vue';
+
+    // 辅助 Base64URL 转换函数
+    function bufferToBase64url(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function base64urlToBuffer(base64url) {
+      let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) {
+        base64 += '=';
+      }
+      const raw = atob(base64);
+      const output = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; ++i) {
+        output[i] = raw.charCodeAt(i);
+      }
+      return output.buffer;
+    }
+
+    const app = createApp({
+      setup() {
+        const mode = ref('login');
+        const loading = ref(false);
+        const showPassword = ref(false);
+        const errorMessage = ref('');
+        const successMessage = ref('');
+
+        const loginForm = reactive({
+          username: '',
+          password: ''
+        });
+
+        const registerForm = reactive({
+          username: '',
+          password: ''
+        });
+
+        const checkUsernameUppercase = (val) => {
+          if (/[A-Z]/.test(val)) {
+            errorMessage.value = '⚠️ 用户名严禁包含大写字母，请使用纯小写字母或数字';
+          } else if (errorMessage.value.includes('用户名严禁包含大写字母')) {
+            errorMessage.value = '';
+          }
+        };
+
+        const checkPasswordUppercase = (val) => {
+          if (/[A-Z]/.test(val)) {
+            errorMessage.value = '⚠️ 密码严禁包含大写字母，请使用小写字母、数字和符号';
+          } else if (errorMessage.value.includes('密码严禁包含大写字母')) {
+            errorMessage.value = '';
+          }
+        };
+
+        // 自动生成 32 位合规强密码
+        const generatePasswordForRegister = () => {
+          const lowers = 'abcdefghijklmnopqrstuvwxyz';
+          const digits = '0123456789';
+          const symbols = '!@#%&*+-=._';
+          const all = lowers + digits + symbols;
+          let pwd = [
+            lowers[Math.floor(Math.random() * lowers.length)],
+            digits[Math.floor(Math.random() * digits.length)],
+            symbols[Math.floor(Math.random() * symbols.length)]
+          ];
+          for (let i = 3; i < 32; i++) {
+            pwd.push(all[Math.floor(Math.random() * all.length)]);
+          }
+          pwd.sort(() => Math.random() - 0.5);
+          registerForm.password = pwd.join('');
+          showPassword.value = true;
+          errorMessage.value = '';
+          successMessage.value = '已为您自动生成 32 位全小写安全随机密码，请复制妥善保管！';
+        };
+
+        // 检查是否已经登录，已登录则直接进入系统
+        const checkAuthStatus = async () => {
+          try {
+            const res = await fetch('/api/auth/me');
+            if (res.ok) {
+              window.location.href = '/';
+            }
+          } catch (e) {}
+        };
+
+        // 处理账号密码登录
+        const handlePasswordLogin = async () => {
+          errorMessage.value = '';
+          successMessage.value = '';
+
+          if (/[A-Z]/.test(loginForm.username) || /[A-Z]/.test(loginForm.password)) {
+            errorMessage.value = '用户名或密码严禁包含大写字母，请修改后重试！';
+            return;
+          }
+
+          loading.value = true;
+          try {
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(loginForm)
+            });
+            const data = await res.json();
+            if (res.ok) {
+              successMessage.value = '登录成功，正在跳转...';
+              setTimeout(() => { window.location.href = '/'; }, 500);
+            } else {
+              errorMessage.value = data.detail || '登录失败，请检查账号密码';
+            }
+          } catch (e) {
+            errorMessage.value = '网络请求失败，请稍后重试';
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        // 处理新用户注册
+        const handleRegister = async () => {
+          errorMessage.value = '';
+          successMessage.value = '';
+
+          if (/[A-Z]/.test(registerForm.username) || /[A-Z]/.test(registerForm.password)) {
+            errorMessage.value = '用户名或密码严禁包含大写字母！';
+            return;
+          }
+          if (registerForm.password.length < 20) {
+            errorMessage.value = '密码长度至少需要 20 个字符！';
+            return;
+          }
+
+          loading.value = true;
+          try {
+            const res = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(registerForm)
+            });
+            const data = await res.json();
+            if (res.ok) {
+              successMessage.value = '注册成功！已为您自动登录，正在跳转...';
+              setTimeout(() => { window.location.href = '/'; }, 600);
+            } else {
+              errorMessage.value = data.detail || '注册失败，请稍后重试';
+            }
+          } catch (e) {
+            errorMessage.value = '网络请求失败，请稍后重试';
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        // 处理通行密钥 (Passkey) 免密登录
+        const handlePasskeyLogin = async () => {
+          errorMessage.value = '';
+          successMessage.value = '';
+
+          if (!window.PublicKeyCredential) {
+            errorMessage.value = '当前浏览器或设备环境不支持 WebAuthn 通行密钥功能。';
+            return;
+          }
+
+          loading.value = true;
+          try {
+            // 1. 发起挑战
+            const startRes = await fetch('/api/auth/passkey/login/start', { method: 'POST' });
+            if (!startRes.ok) {
+              throw new Error('获取通行密钥登录挑战失败');
+            }
+            const options = await startRes.json();
+            options.challenge = base64urlToBuffer(options.challenge);
+
+            // 2. 唤起原生通行密钥选择器 (Touch ID / Face ID / Windows Hello)
+            const credential = await navigator.credentials.get({
+              publicKey: options
+            });
+
+            if (!credential) {
+              throw new Error('未获取到通行密钥凭据');
+            }
+
+            // 3. 组织凭据并提交给后端验签
+            const finishPayload = {
+              id: credential.id,
+              rawId: bufferToBase64url(credential.rawId),
+              type: credential.type,
+              response: {
+                clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+                signature: bufferToBase64url(credential.response.signature)
+              }
+            };
+
+            const finishRes = await fetch('/api/auth/passkey/login/finish', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(finishPayload)
+            });
+            const finishData = await finishRes.json();
+
+            if (finishRes.ok) {
+              successMessage.value = '通行密钥校验通过，正在进入系统...';
+              setTimeout(() => { window.location.href = '/'; }, 500);
+            } else {
+              errorMessage.value = finishData.detail || '通行密钥校验失败，请使用账号密码登录';
+            }
+          } catch (e) {
+            if (e.name === 'NotAllowedError') {
+              errorMessage.value = '已取消通行密钥验证操作。';
+            } else {
+              errorMessage.value = e.message || '通行密钥登录失败';
+            }
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        onMounted(() => {
+          checkAuthStatus();
+        });
+
+        return {
+          mode,
+          loading,
+          showPassword,
+          errorMessage,
+          successMessage,
+          loginForm,
+          registerForm,
+          checkUsernameUppercase,
+          checkPasswordUppercase,
+          generatePasswordForRegister,
+          handlePasswordLogin,
+          handleRegister,
+          handlePasskeyLogin
+        };
+      }
+    });
+
+    app.mount('#app');
+  </script>
+</body>
+</html>
