@@ -118,6 +118,19 @@ DYNAMIC_REGIONS = [
 ]
 
 
+def sort_residential_nodes(names: List[str]) -> List[str]:
+    """
+    家宽住宅主备优先排序：
+    1. 协议优先：AnyTLS (' A ' 或 'AnyTLS') 作为第一顺位主选，优于 VLESS (' V ')
+    2. 线路优先：主线 ('01' / '主线') 优先于 备用 ('02' / '备用')
+    """
+    def key_fn(n: str):
+        proto_score = 0 if (' A ' in n or 'AnyTLS' in n) else 1
+        line_score = 0 if ('01' in n or '主线' in n) else 1
+        return (proto_score, line_score, n)
+    return sorted(names, key=key_fn)
+
+
 def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     根据接入的可用物理节点，自动计算带边界的聚合动态策略组 (URL-Test / Fallback)。
@@ -160,14 +173,15 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
 
     # 2. 纯净美国家宽住宅智能主备组 (绝不混入机房IP)
     if residential_names:
+        sorted_res = sort_residential_nodes(residential_names)
         groups.append({
             "name": "[动态·家宽] 🇺🇸 美国住宅智能主备",
             "type": "fallback",
             "strategy": "纯净住宅IP主备容灾",
             "country_code": "US",
             "country_flag": "🇺🇸",
-            "node_count": len(residential_names),
-            "proxies": list(residential_names),
+            "node_count": len(sorted_res),
+            "proxies": sorted_res,
             "url": "http://www.gstatic.com/generate_204",
             "interval": 300,
             "tolerance": 50
@@ -213,6 +227,7 @@ def extract_source_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any
             s_name = "[源·RE] 🇺🇸 RESIP 美国家宽专区"
             s_type = "fallback"
             s_flag = "🇺🇸"
+            n_names = sort_residential_nodes(n_names)
         elif code == "SD":
             s_name = "[源·SD] 🌐 SDK 机场全节点专区"
             s_type = "url-test"
