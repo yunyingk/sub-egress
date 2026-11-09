@@ -3,7 +3,7 @@ export default {
   props: {
     isDark: { type: Boolean, default: false },
     syncing: { type: Boolean, default: false },
-    version: { type: String, default: 'v0.2.4' }
+    version: { type: String, default: 'v0.2.5' }
   },
   emits: ['toggleTheme', 'openSettings', 'refreshAll'],
   template: `

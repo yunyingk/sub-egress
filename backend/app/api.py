@@ -43,8 +43,8 @@ async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
 
 # ==================== 下游订阅分发端点 (供客户端直连与多内核分发) ====================
 
-@router.get("/c/{token}", summary="基于安全令牌的统一订阅调度端点")
-@router.get("/feed", summary="标准统一订阅调度端点")
+@router.api_route("/c/{token}", methods=["GET", "HEAD"], summary="基于安全令牌的统一订阅调度端点")
+@router.api_route("/feed", methods=["GET", "HEAD"], summary="标准统一订阅调度端点")
 async def export_subscription(
     token: Optional[str] = None,
     target: Optional[str] = Query(None, description="目标客户端内核: clash, sing-box, base64"),
