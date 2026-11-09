@@ -78,7 +78,7 @@ export default {
           <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div>
               <span class="text-xs font-bold text-slate-800 dark:text-slate-200 block">强制携带安全令牌 (Token Enforce)</span>
-              <span class="text-[11px] text-slate-500 dark:text-slate-400 block">开启后，匿名直接访问 /clash 将返回 403 阻断；关闭则为宽松模式。</span>
+              <span class="text-[11px] text-slate-500 dark:text-slate-400 block">开启后，未携带合法安全令牌的访问将直接返回 403 阻断；关闭则为宽松模式。</span>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input v-model="editSettings.require_token" type="checkbox" class="sr-only peer">

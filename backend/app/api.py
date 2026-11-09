@@ -43,21 +43,13 @@ async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
 
 # ==================== 下游订阅分发端点 (供客户端直连与多内核分发) ====================
 
-@router.get("/c/{token}", summary="基于哈希令牌的统一下游订阅")
-@router.get("/sub/{token}", summary="兼容 Sub-Store 哈希订阅")
-@router.get("/sub/{token}/{name}/{sub_target}", summary="兼容 Sub-Store 级联端点")
-@router.get("/clash", summary="获取合并后的完整 ClashMeta 配置")
-@router.get("/download/clash")
-@router.get("/download/collection/{collection_name}")
-@router.get("/download/collection/{collection_name}/{sub_target}")
-@router.get("/export")
-@router.get("/feed")
+@router.get("/c/{token}", summary="基于安全令牌的统一订阅调度端点")
+@router.get("/feed", summary="标准统一订阅调度端点")
 async def export_subscription(
     token: Optional[str] = None,
-    sub_target: Optional[str] = None,
-    target: Optional[str] = Query(None, description="目标内核: clash, sing-box, base64"),
+    target: Optional[str] = Query(None, description="目标客户端内核: clash, sing-box, base64"),
     type: Optional[str] = Query(None, description="别名目标内核: clash, sing-box, base64"),
-    t: Optional[str] = Query(None, description="Query 传递的 token"),
+    t: Optional[str] = Query(None, description="Query 传递的安全令牌 (用于 /feed)"),
     db: AsyncSession = Depends(get_db)
 ):
     settings = await get_system_settings(db)
@@ -73,10 +65,10 @@ async def export_subscription(
             )
 
     # 确定目标导出内核
-    raw_target = (target or type or sub_target or settings.get("default_target", "clash")).lower()
+    raw_target = (target or type or settings.get("default_target", "clash")).lower()
     if raw_target in ("sing-box", "singbox", "sb"):
         final_target = "sing-box"
-    elif raw_target in ("base64", "uri", "txt", "feed"):
+    elif raw_target in ("base64", "uri", "txt"):
         final_target = "base64"
     else:
         final_target = "clash"

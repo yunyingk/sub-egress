@@ -17,7 +17,7 @@ export default {
       if (token) {
         return `${origin}/c/${token}?target=${target}`;
       }
-      return `${origin}/clash`;
+      return `${origin}/feed?target=${target}`;
     });
 
     const formatExt = computed(() => {
