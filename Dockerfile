@@ -11,7 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN mkdir -p /data /frontend
 
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 COPY backend/app ./app
 COPY frontend /frontend

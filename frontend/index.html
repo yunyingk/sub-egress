@@ -148,14 +148,26 @@
             </div>
 
             <!-- 流量与到期时间 -->
-            <div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-              <div class="flex items-center gap-1.5">
-                <i class="fa-solid fa-chart-pie text-slate-400"></i>
-                <span>流量: {{ formatBytes(src.traffic_used) }} / {{ formatBytes(src.traffic_total) }}</span>
+            <div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/60 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <div class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
+                  <i class="fa-solid fa-chart-pie text-sky-500"></i>
+                  <span>已用: <strong class="font-mono text-slate-900 dark:text-white">{{ formatBytes(src.traffic_used) }}</strong> ({{ getTrafficPercent(src) }}%)</span>
+                  <span class="text-slate-300 dark:text-slate-600">/</span>
+                  <span class="text-slate-500">总额: {{ formatBytes(src.traffic_total) }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 font-mono text-xs text-slate-500 dark:text-slate-400">
+                  <span v-if="src.reset_info" class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 dark:bg-sky-950/80 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[11px] font-sans font-medium">
+                    {{ src.reset_info }}
+                  </span>
+                  <span>{{ src.expire_at ? formatDate(src.expire_at) : '长期有效' }}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-1.5 font-mono">
-                <i class="fa-regular fa-clock text-slate-400"></i>
-                <span>{{ src.expire_at ? formatDate(src.expire_at) : '长期有效' }}</span>
+
+              <!-- 视觉进度条 -->
+              <div v-if="src.traffic_total > 0" class="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden flex">
+                <div class="h-full bg-gradient-to-r from-sky-500 to-blue-600 rounded-full transition-all duration-300"
+                     :style="{ width: Math.min(100, Math.max(getTrafficPercent(src), src.traffic_used > 0 ? 2 : 0)) + '%' }"></div>
               </div>
             </div>
           </div>
@@ -676,6 +688,12 @@
           }
         };
 
+        const getTrafficPercent = (src) => {
+          if (!src || !src.traffic_total || src.traffic_total === 0) return 0;
+          const pct = ((src.traffic_used || 0) / src.traffic_total) * 100;
+          return parseFloat(pct.toFixed(1));
+        };
+
         const formatBytes = (bytes) => {
           if (!bytes || bytes === 0) return '0 B';
           const k = 1024;
@@ -715,6 +733,7 @@
           getCountryFlag,
           maskUrl,
           formatBytes,
+          getTrafficPercent,
           formatDate,
           refreshAll,
           refreshSource,

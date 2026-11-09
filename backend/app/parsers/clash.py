@@ -60,6 +60,27 @@ def is_residential_node(name: str, proxy: Dict[str, Any]) -> bool:
         return True
     return False
 
+def extract_subscription_extra_info(text: str) -> Dict[str, Any]:
+    """
+    Extract extra metadata embedded by airports (e.g. pseudo-node comments)
+    such as reset countdown and remaining traffic.
+    """
+    info: Dict[str, Any] = {}
+    if not text:
+        return info
+    
+    # Check reset countdown: e.g. "距离下次重置剩余：29 天" or "下次重置: 29天"
+    m_reset = re.search(r"重置[^\d\n]*(\d+)\s*天", text)
+    if m_reset:
+        info["reset_info"] = f"{m_reset.group(1)} 天后重置"
+        
+    # Check remaining traffic: e.g. "剩余流量：150 GB"
+    m_remain = re.search(r"剩余流量[：:]\s*([\d\.]+\s*[GMK]B)", text, re.IGNORECASE)
+    if m_remain:
+        info["remaining_text"] = m_remain.group(1).strip()
+        
+    return info
+
 def parse_clash_yaml(content: str) -> List[Dict[str, Any]]:
     try:
         data = yaml.safe_load(content)

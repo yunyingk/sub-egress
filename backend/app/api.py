@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .builder import build_base64_config, build_clash_config, build_singbox_config
 from .db import get_db
 from .models import Node, Setting, Source
+from .parsers.clash import extract_subscription_extra_info
 from .syncer import sync_single_source
 
 router = APIRouter()
@@ -213,20 +214,26 @@ async def list_sources(db: AsyncSession = Depends(get_db)):
     stmt = select(Source).order_by(Source.id)
     res = await db.execute(stmt)
     sources = res.scalars().all()
-    return [{
-        "id": s.id,
-        "name": s.name,
-        "url": s.url,
-        "source_type": s.source_type,
-        "enabled": s.enabled,
-        "status": s.status,
-        "error_message": s.error_message,
-        "node_count": s.node_count,
-        "traffic_used": s.traffic_used,
-        "traffic_total": s.traffic_total,
-        "expire_at": s.expire_at.isoformat() if s.expire_at else None,
-        "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
-    } for s in sources]
+    results = []
+    for s in sources:
+        extra = extract_subscription_extra_info(s.raw_content or "")
+        results.append({
+            "id": s.id,
+            "name": s.name,
+            "url": s.url,
+            "source_type": s.source_type,
+            "enabled": s.enabled,
+            "status": s.status,
+            "error_message": s.error_message,
+            "node_count": s.node_count,
+            "traffic_used": s.traffic_used,
+            "traffic_total": s.traffic_total,
+            "expire_at": s.expire_at.isoformat() if s.expire_at else None,
+            "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
+            "reset_info": extra.get("reset_info"),
+            "remaining_text": extra.get("remaining_text")
+        })
+    return results
 
 @router.post("/api/sources", summary="新增上游源")
 async def create_source(payload: SourceCreate, db: AsyncSession = Depends(get_db)):

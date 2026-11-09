@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-09
+
+### Added
+- **Traffic Usage & Billing Cycle Extraction**: Extract cycle reset days (e.g. `29 天后重置`) and remaining quota from subscription text/headers.
+- **Enhanced Traffic Visuals**: Card progress bar and percentage display clarifying 0 B usage upon monthly quota resets.
+- **Automated Gitea & Infra GitOps Pipeline**: Integrated with personal `infra` deployment repository. Pushing tags triggers automatic building and K3s rollout via `watch.sh`.
+- **Zero-Config Localhost & SQLite Support**: Seamlessly runs on localhost or single container with automatic SQLite fallback when no PostgreSQL is provided.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
