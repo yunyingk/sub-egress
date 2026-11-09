@@ -812,11 +812,19 @@ async def export_subscription(
 
     # 构建对应内核配置
     if final_target == "clash":
+        try:
+            m_port = int(mixed_port)
+        except (ValueError, TypeError):
+            m_port = 7897
+        try:
+            t_port = int(terminal_port)
+        except (ValueError, TypeError):
+            t_port = 7898
+
         content = build_clash_config(
             nodes_list,
-            profile_title=display_profile_title,
-            mixed_port=mixed_port,
-            terminal_port=terminal_port
+            mixed_port=m_port,
+            terminal_port=t_port
         )
         media_type = "text/yaml; charset=utf-8"
     elif final_target == "sing-box":
