@@ -13,6 +13,7 @@ RUN mkdir -p /data /frontend
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
+COPY pyproject.toml ./pyproject.toml
 COPY backend/app ./app
 COPY frontend /frontend
 

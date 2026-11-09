@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import router
 from .db import init_db
 from .syncer import background_ping_worker, background_sync_worker
+from .version import VERSION
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="sub-egress",
     description="出站网关与订阅聚合调度中枢",
-    version="0.2.15",
+    version=VERSION,
     lifespan=lifespan
 )
 

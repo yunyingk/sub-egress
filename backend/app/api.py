@@ -17,6 +17,7 @@ from .db import get_db
 from .models import Node, Setting, Source
 from .parsers.clash import extract_subscription_extra_info
 from .syncer import ping_single_node, sync_single_source
+from .version import VERSION
 
 router = APIRouter()
 
@@ -188,6 +189,7 @@ class SettingsPayload(BaseModel):
 async def get_settings(db: AsyncSession = Depends(get_db)):
     settings = await get_system_settings(db)
     return {
+        "version": VERSION,
         "sub_hash_token": settings.get("sub_hash_token", ""),
         "require_token": settings.get("require_token", "false").lower() == "true",
         "default_target": settings.get("default_target", "clash"),
@@ -436,7 +438,11 @@ async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: Async
 
 @router.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "sub-egress", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "service": "sub-egress", "version": VERSION, "timestamp": datetime.utcnow().isoformat()}
+
+@router.get("/api/version", summary="获取服务版本号")
+async def get_version():
+    return {"version": VERSION}
 
 @router.get("/favicon.ico", include_in_schema=False)
 async def favicon_ico():

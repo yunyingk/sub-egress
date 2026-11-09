@@ -1,4 +1,4 @@
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Navbar from './components/Navbar.js';
 import SourceList from './components/SourceList.js';
 import OutboundFeed from './components/OutboundFeed.js';
@@ -38,6 +38,11 @@ export default {
     // 添加源状态
     const showAddModal = ref(false);
     const creatingSource = ref(false);
+
+    // 服务端下发版本号
+    const appVersion = computed(() => {
+      return settings.value?.version ? `v${settings.value.version}` : '';
+    });
 
     // 数据加载
     const fetchSources = async () => {
@@ -175,6 +180,7 @@ export default {
       savingSettings,
       showAddModal,
       creatingSource,
+      appVersion,
       refreshAll,
       refreshSource,
       deleteSource,
@@ -185,6 +191,7 @@ export default {
   template: `
     <div class="max-w-7xl mx-auto px-4 py-8">
       <Navbar 
+        :version="appVersion"
         :syncing="syncing"
         @open-settings="showSettingsModal = true" 
         @refresh-all="refreshAll" 

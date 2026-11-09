@@ -7,7 +7,7 @@ export default {
   },
   props: {
     syncing: { type: Boolean, default: false },
-    version: { type: String, default: 'v0.2.15' }
+    version: { type: String, default: '' }
   },
   emits: ['openSettings', 'refreshAll'],
   template: `
@@ -23,7 +23,7 @@ export default {
               <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 服务就绪
               </span>
-              <span class="text-xs text-slate-400 font-mono">{{ version }}</span>
+              <span v-if="version" class="text-xs text-slate-400 font-mono">{{ version }}</span>
             </div>
             <p class="text-sm text-slate-500 dark:text-slate-400">出站网关 · 多内核订阅聚合调度 · 二元制单选中心</p>
           </div>
