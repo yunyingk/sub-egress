@@ -1,7 +1,10 @@
 from datetime import datetime
+import os
+from pathlib import Path
 import secrets
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -314,3 +317,12 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
 @router.get("/health")
 async def health_check():
     return {"status": "ok", "service": "sub-egress", "timestamp": datetime.utcnow().isoformat()}
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    fav = Path(os.getenv("FRONTEND_DIR", "/frontend")) / "favicon.ico"
+    if not fav.exists():
+        fav = Path(__file__).resolve().parent.parent.parent / "frontend" / "favicon.ico"
+    if fav.exists():
+        return FileResponse(fav, media_type="image/x-icon")
+    return Response(status_code=404)
