@@ -1,3 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sub-egress-secret
+  namespace: infra
+type: Opaque
+stringData:
+  # Replace with your PostgreSQL connection string, or omit DATABASE_URL to use SQLite
+  DATABASE_URL: "postgresql+asyncpg://dev:0317b6aca410fc390d59ee3a7eb220903c7f33f5aec71574@shared-postgres18.infra.svc.cluster.local:5432/sub_egress"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,9 +34,18 @@ spec:
               name: http
           env:
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://dev:0317b6aca410fc390d59ee3a7eb220903c7f33f5aec71574@shared-postgres18.infra.svc.cluster.local:5432/sub_egress"
+              valueFrom:
+                secretKeyRef:
+                  name: sub-egress-secret
+                  key: DATABASE_URL
+                  optional: true
             - name: FRONTEND_DIR
               value: "/frontend"
+            - name: DATA_DIR
+              value: "/data"
+          volumeMounts:
+            - name: data-volume
+              mountPath: /data
           livenessProbe:
             httpGet:
               path: /health
@@ -46,6 +65,9 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+      volumes:
+        - name: data-volume
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

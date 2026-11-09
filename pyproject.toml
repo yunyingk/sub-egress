@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sub-egress"
-version = "0.2.0"
+version = "0.2.1"
 description = "Modern outbound gateway and multi-core subscription aggregation hub with binary selector design"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy>=2.0.36",
     "asyncpg>=0.30.0",
+    "aiosqlite>=0.20.0",
     "httpx>=0.28.0",
     "pyyaml>=6.0.2",
     "pydantic>=2.10.0"

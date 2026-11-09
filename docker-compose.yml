@@ -1,0 +1,40 @@
+services:
+  sub-egress:
+    image: yunyingk/sub-egress:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sub-egress
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - DATA_DIR=/data
+      # Uncomment DATABASE_URL to connect to external PostgreSQL or bundled postgres service:
+      # - DATABASE_URL=postgresql+asyncpg://dev:password@postgres:5432/sub_egress
+    volumes:
+      - sub_data:/data
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+
+  # Optional bundled PostgreSQL 18 service
+  # postgres:
+  #   image: postgres:18-alpine
+  #   container_name: sub-egress-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: sub_egress
+  #     POSTGRES_USER: dev
+  #     POSTGRES_PASSWORD: password
+  #   volumes:
+  #     - pg_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U dev -d sub_egress"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  sub_data:
+  # pg_data:

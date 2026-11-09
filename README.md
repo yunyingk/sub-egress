@@ -1,10 +1,10 @@
 # sub-egress · 出站网关与多内核订阅调度中枢
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue.svg" alt="version">
+  <img src="https://img.shields.io/badge/version-0.2.1-blue.svg" alt="version">
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="python">
   <img src="https://img.shields.io/badge/framework-FastAPI-009688.svg" alt="FastAPI">
-  <img src="https://img.shields.io/badge/database-PostgreSQL%2018-336791.svg" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/database-PostgreSQL%20%7C%20SQLite-336791.svg" alt="Database">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
 </p>
 
@@ -30,9 +30,9 @@
 - **`[透传·{机场名}] ...`**：平铺所有物理节点，带有清晰前缀，方便客户端直接点选。
 
 ### 3. 多内核原生支持 (ClashMeta + Sing-box)
-- **Mihomo / ClashMeta**：生成标准化精简 YAML 配置。
-- **Sing-box**：生成包含 DNS 独立解析、Mixed Inbound、Outbound Selector 与 Route 规则的完整 JSON。
-- **Base64 / URI**：支持标准 Shadowsocks、VLESS Reality、Trojan、Hysteria2 节点链接串导出。
+- **Mihomo / ClashMeta**：生成标准化精简 YAML 配置 (`?target=clash`)。
+- **Sing-box**：生成包含 DNS 独立解析、Mixed Inbound、Outbound Selector 与 Route 规则的完整 JSON (`?target=sing-box`)。
+- **Base64 / URI**：支持标准 Shadowsocks、VLESS Reality、Trojan、Hysteria2 节点链接串导出 (`?target=base64`)。
 
 ### 4. 订阅安全 Hash 令牌与读写访问控制
 - 下游订阅支持基于混淆 Hash Token 的专属端点：
@@ -40,79 +40,54 @@
   https://sub.ying-qing.cn/c/<hash_token>?target=clash
   https://sub.ying-qing.cn/c/<hash_token>?target=sing-box
   ```
-- 提供“强制安全令牌访问”开关与独立的管理写入 API Key，抵御公网嗅探与扫描。
+- 内置「读写设置」中心，支持强制安全令牌访问阻断公网探测，支持自定义管理写入 API Key。
 
 ---
 
-## 🚀 架构总览 (System Architecture)
+## 🚀 启动与部署方式 (Deployment)
 
-```mermaid
-flowchart TD
-    subgraph Inbound["上游订阅输入 (Inbound Sources)"]
-        S1["SDKDNS 主力机场"]
-        S2["RESIP 纯净美国家宽"]
-        S3["第三方 / 自建节点"]
-    end
+`sub-egress` 支持零配置极简启动与生产级企业集群部署：
 
-    subgraph Core["sub-egress 调度引擎"]
-        Sync["异步同步器 (Syncer)"]
-        Parser["多协议解析器 (Clash / Base64 / URI)"]
-        DB[("PostgreSQL 18 共享库")]
-        Builder["二元制规则组装器 (Builder)"]
-        Settings["读写权限与系统设置"]
-    end
-
-    subgraph Outbound["下游专属订阅端点 (Outbound Feeds)"]
-        C1["/c/{token}?target=clash (Mihomo YAML)"]
-        C2["/c/{token}?target=sing-box (Sing-box JSON)"]
-        C3["/c/{token}?target=base64 (Raw Base64)"]
-    end
-
-    Inbound --> Sync
-    Sync --> Parser
-    Parser --> DB
-    DB --> Builder
-    Settings --> Builder
-    Builder --> Outbound
-```
-
----
-
-## 🛠️ 快速部署 (Deployment)
-
-### Docker Compose
-```yaml
-services:
-  sub-egress:
-    image: yunyingk/sub-egress:v0.2.0
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://dev:password@postgres:5432/sub_egress
-      - FRONTEND_DIR=/frontend
-    depends_on:
-      - postgres
-
-  postgres:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=sub_egress
-      - POSTGRES_USER=dev
-      - POSTGRES_PASSWORD=password
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-volumes:
-  pgdata:
-```
-
-### Kubernetes (K3s)
-项目内包含全套 Kubernetes 清单：
+### 方式 1：Docker 一键单容器启动 (零依赖，内置 SQLite)
+适合任何只需要单机跑起来的用户，无需预装任何外部数据库：
 ```bash
+docker run -d \
+  --name sub-egress \
+  -p 8000:8000 \
+  -v sub_data:/data \
+  --restart unless-stopped \
+  yunyingk/sub-egress:latest
+```
+访问 `http://localhost:8000` 即可立即进入 Web 控制台。
+
+---
+
+### 方式 2：Docker Compose (支持 SQLite 或自带 PostgreSQL 18)
+项目根目录已附带开箱即用的 [`docker-compose.yml`](docker-compose.yml)：
+```bash
+# 1. 克隆项目
+git clone https://github.com/yunyingk/sub-egress.git && cd sub-egress
+
+# 2. 启动服务 (默认使用内置持久化卷)
+docker compose up -d
+```
+如需外接 PostgreSQL，可在 `docker-compose.yml` 中解开 `DATABASE_URL` 注释或解开自带的 `postgres` 容器服务。
+
+---
+
+### 方式 3：Kubernetes / K3s 集群部署 (推荐生产使用)
+项目提供了 [`k8s/`](k8s/) 原生资源清单，已支持通过 Secret 挂载 PostgreSQL 连接串：
+```bash
+# 1. 配置数据库连接 Secret (参考 k8s/secret.example.yaml)
+kubectl apply -f k8s/secret.example.yaml
+
+# 2. 部署服务与 Service
 kubectl apply -f k8s/deployment.yaml
 ```
+
+**PostgreSQL 连接串格式说明**：
+* 必须使用异步驱动前缀：`postgresql+asyncpg://<user>:<password>@<host>:5432/<dbname>`
+* 若传入标准 `postgresql://` 或 `postgres://`，系统会自动内部转换为 `postgresql+asyncpg://`。
 
 ---
 

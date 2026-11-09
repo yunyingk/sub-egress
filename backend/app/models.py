@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -40,7 +39,7 @@ class Node(Base):
     country_code = Column(String(16), default="OTHER", index=True)
     country_flag = Column(String(8), default="🌐")
     is_residential = Column(Boolean, default=False, index=True)
-    config_json = Column(JSONB, nullable=False)
+    config_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     source = relationship("Source", back_populates="nodes")
