@@ -1,8 +1,10 @@
+import asyncio
 import base64
 from datetime import datetime
 import os
 from pathlib import Path
 import secrets
+import time
 from typing import Any, Dict, List, Optional
 import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -340,6 +342,72 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
         "total": len(nodes),
         "dynamic_groups": dynamic_groups,
         "nodes": nodes
+    }
+
+# ==================== 节点延迟测速 API ====================
+
+async def ping_single_node(host: str, port: int, node_type: str, timeout: float = 2.5) -> Dict[str, Any]:
+    t0 = time.perf_counter()
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        rtt = (time.perf_counter() - t0) * 1000.0
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return {"latency": round(rtt, 1), "status": "ok", "error": None}
+    except ConnectionRefusedError:
+        rtt = (time.perf_counter() - t0) * 1000.0
+        if node_type == "hysteria2":
+            return {"latency": round(rtt, 1), "status": "ok", "error": None}
+        return {"latency": round(rtt, 1), "status": "refused", "error": "Connection refused"}
+    except asyncio.TimeoutError:
+        return {"latency": None, "status": "timeout", "error": "Connection timed out"}
+    except Exception as e:
+        return {"latency": None, "status": "error", "error": str(e)}
+
+class BatchPingPayload(BaseModel):
+    node_ids: Optional[List[int]] = None
+
+@router.post("/api/nodes/{node_id}/ping", summary="测试单个节点网络握手延迟")
+async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
+    stmt = select(Node).where(Node.id == node_id)
+    res = await db.execute(stmt)
+    node = res.scalar_one_or_none()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    result = await ping_single_node(node.server, node.port, node.node_type)
+    return {
+        "node_id": node.id,
+        "display_name": node.display_name,
+        "server": node.server,
+        "port": node.port,
+        **result
+    }
+
+@router.post("/api/nodes/ping", summary="批量并发测试节点延迟")
+async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: AsyncSession = Depends(get_db)):
+    stmt = select(Node.id, Node.server, Node.port, Node.node_type)
+    if payload and payload.node_ids:
+        stmt = stmt.where(Node.id.in_(payload.node_ids))
+    res = await db.execute(stmt)
+    nodes = res.fetchall()
+
+    sem = asyncio.Semaphore(20)
+
+    async def worker(nid: int, host: str, port: int, ntype: str):
+        async with sem:
+            res = await ping_single_node(host, port, ntype, timeout=2.5)
+            return nid, res
+
+    tasks = [worker(n[0], n[1], n[2], n[3]) for n in nodes]
+    results = await asyncio.gather(*tasks)
+
+    return {
+        "total": len(results),
+        "results": {str(nid): ping_res for nid, ping_res in results}
     }
 
 @router.get("/health")

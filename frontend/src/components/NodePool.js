@@ -12,6 +12,149 @@ export default {
     const searchQuery = ref('');
     const selectedCountry = ref('ALL');
     const selectedGroup = ref(null);
+    const sortByLatency = ref(false);
+
+    // 延迟测速状态管理
+    const initialLatencies = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('sub_egress_node_latencies') || '{}');
+      } catch (e) {
+        return {};
+      }
+    })();
+    const nodeLatencies = ref(initialLatencies);
+    const testingNodeIds = ref(new Set());
+    const isBatchTesting = ref(false);
+
+    const saveLatencies = () => {
+      try {
+        localStorage.setItem('sub_egress_node_latencies', JSON.stringify(nodeLatencies.value));
+      } catch (e) {}
+    };
+
+    const isTestingNode = (id) => testingNodeIds.value.has(id);
+
+    const getNodeLatency = (id) => {
+      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
+      if (!item) return null;
+      return item.latency !== undefined ? item.latency : null;
+    };
+
+    const formatNodeLatency = (id) => {
+      if (isTestingNode(id)) return '测速中...';
+      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
+      if (!item) return '测延迟';
+      if (item.latency !== null && item.latency !== undefined) {
+        return `${item.latency} ms`;
+      }
+      if (item.status === 'timeout') return '超时';
+      if (item.status === 'refused') return '拒绝';
+      if (item.status) return '不可达';
+      return '测延迟';
+    };
+
+    const getLatencyBadgeClass = (id) => {
+      if (isTestingNode(id)) {
+        return 'bg-sky-50 text-sky-600 border-sky-300 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800 animate-pulse';
+      }
+      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
+      if (!item) {
+        return 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 hover:bg-sky-50 hover:text-sky-600 hover:border-sky-300 dark:hover:bg-sky-950 dark:hover:text-sky-300';
+      }
+      const lat = item.latency;
+      if (lat !== null && lat !== undefined) {
+        if (lat < 250) {
+          return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 hover:bg-emerald-100';
+        }
+        if (lat < 500) {
+          return 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800 hover:bg-sky-100';
+        }
+        return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 hover:bg-amber-100';
+      }
+      return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800 hover:bg-rose-100';
+    };
+
+    // 单节点测速
+    const pingSingleNode = async (node) => {
+      if (testingNodeIds.value.has(node.id)) return;
+      testingNodeIds.value.add(node.id);
+      try {
+        const resp = await fetch(`/api/nodes/${node.id}/ping`, { method: 'POST' });
+        if (resp.ok) {
+          const data = await resp.json();
+          nodeLatencies.value = {
+            ...nodeLatencies.value,
+            [String(node.id)]: {
+              latency: data.latency,
+              status: data.status,
+              time: Date.now()
+            }
+          };
+          saveLatencies();
+        }
+      } catch (err) {
+        nodeLatencies.value = {
+          ...nodeLatencies.value,
+          [String(node.id)]: {
+            latency: null,
+            status: 'error',
+            time: Date.now()
+          }
+        };
+      } finally {
+        testingNodeIds.value.delete(node.id);
+      }
+    };
+
+    // 批量并发测速（支持测试当前展示的节点）
+    const pingCurrentFilteredNodes = async () => {
+      if (isBatchTesting.value) return;
+      const targetList = filteredNodes.value;
+      if (!targetList.length) return;
+
+      isBatchTesting.value = true;
+      const ids = targetList.map(n => n.id);
+      ids.forEach(id => testingNodeIds.value.add(id));
+
+      try {
+        const resp = await fetch('/api/nodes/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ node_ids: ids })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          nodeLatencies.value = {
+            ...nodeLatencies.value,
+            ...data.results
+          };
+          saveLatencies();
+        }
+      } catch (err) {
+        console.error('Batch ping error:', err);
+      } finally {
+        ids.forEach(id => testingNodeIds.value.delete(id));
+        isBatchTesting.value = false;
+      }
+    };
+
+    // 获取动态组的最佳延迟
+    const getGroupBestLatency = (grp) => {
+      if (!grp.proxies || !grp.proxies.length) return null;
+      let minLat = null;
+      for (const proxyName of grp.proxies) {
+        const matched = props.nodes.find(n => n.display_name === proxyName);
+        if (matched) {
+          const item = nodeLatencies.value[matched.id] || nodeLatencies.value[String(matched.id)];
+          if (item && item.latency !== null && item.latency !== undefined) {
+            if (minLat === null || item.latency < minLat) {
+              minLat = item.latency;
+            }
+          }
+        }
+      }
+      return minLat;
+    };
 
     const toggleMasterCollapse = () => {
       isMasterCollapsed.value = !isMasterCollapsed.value;
@@ -48,7 +191,7 @@ export default {
     };
 
     const filteredNodes = computed(() => {
-      return props.nodes.filter(n => {
+      let list = props.nodes.filter(n => {
         // 如果激活了动态组筛选
         if (selectedGroup.value && selectedGroup.value.proxies) {
           if (!selectedGroup.value.proxies.includes(n.display_name)) {
@@ -71,6 +214,19 @@ export default {
         }
         return true;
       });
+
+      if (sortByLatency.value) {
+        list = [...list].sort((a, b) => {
+          const latA = getNodeLatency(a.id);
+          const latB = getNodeLatency(b.id);
+          if (latA !== null && latB !== null) return latA - latB;
+          if (latA !== null) return -1;
+          if (latB !== null) return 1;
+          return 0;
+        });
+      }
+
+      return list;
     });
 
     return {
@@ -81,10 +237,20 @@ export default {
       searchQuery,
       selectedCountry,
       selectedGroup,
+      sortByLatency,
       filterByGroup,
       countryStats,
       getCountryFlag,
-      filteredNodes
+      filteredNodes,
+      isTestingNode,
+      getNodeLatency,
+      getNodeStatus,
+      formatNodeLatency,
+      getLatencyBadgeClass,
+      pingSingleNode,
+      pingCurrentFilteredNodes,
+      isBatchTesting,
+      getGroupBestLatency
     };
   },
   template: `
@@ -102,11 +268,11 @@ export default {
                 ⚡ {{ dynamicGroups.length }} 动态组 · 🌐 {{ nodes.length }} 节点
               </span>
             </div>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">聚合动态策略组自动测速容灾 + 物理透传平铺，客户端自由选择</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">聚合动态策略组自动测速容灾 + 物理透传平铺，支持单节点与批量实时测速</p>
           </div>
         </div>
 
-        <!-- 右侧操作区：整卡折叠按钮 -->
+        <!-- 右侧操作区：搜索与整卡折叠按钮 -->
         <div class="flex items-center gap-2">
           <!-- 搜索框（展开时展示） -->
           <div v-show="!isMasterCollapsed && !isPhysicalCollapsed" class="relative">
@@ -117,7 +283,7 @@ export default {
 
           <button @click="toggleMasterCollapse" 
                   type="button"
-                  class="px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 shadow-2xs"
+                  class="px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                   :title="isMasterCollapsed ? '展开查看大盘全部内容' : '折叠收起整个大盘卡片'">
             <i class="fa-solid text-xs text-sky-500" :class="isMasterCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
             <span>{{ isMasterCollapsed ? '展开大盘' : '折叠收起' }}</span>
@@ -194,9 +360,14 @@ export default {
               </div>
 
               <div class="flex items-center justify-between text-[11px] pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                <span class="font-mono text-slate-600 dark:text-slate-300 font-medium">
-                  {{ grp.node_count }} 节点聚合
-                </span>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-slate-600 dark:text-slate-300 font-medium">
+                    {{ grp.node_count }} 节点聚合
+                  </span>
+                  <span v-if="getGroupBestLatency(grp)" class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-0.5">
+                    <i class="fa-solid fa-bolt text-[8px]"></i> {{ getGroupBestLatency(grp) }} ms
+                  </span>
+                </div>
                 <span class="text-slate-400 dark:text-slate-500 font-mono text-[10px]">
                   {{ grp.interval }}s / {{ grp.tolerance || 50 }}ms
                 </span>
@@ -205,7 +376,7 @@ export default {
           </div>
         </div>
 
-        <!-- 模块二：🌐 物理透传平铺节点池 (可独立折叠收起) -->
+        <!-- 模块二：🌐 物理透传平铺节点池 (可独立折叠收起，支持单节点与批量测速) -->
         <div class="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
           <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="flex items-center gap-2">
@@ -218,17 +389,37 @@ export default {
               </span>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <!-- 激活策略组高亮提示 -->
               <div v-if="selectedGroup" class="flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 px-2.5 py-1 rounded-lg border border-sky-200 dark:border-sky-800">
                 <i class="fa-solid fa-filter"></i>
                 <span>已过滤 <strong>{{ selectedGroup.name }}</strong> 成员 ({{ filteredNodes.length }} 个)</span>
               </div>
 
+              <!-- 批量一键测速按钮 -->
+              <button @click="pingCurrentFilteredNodes" 
+                      type="button"
+                      :disabled="isBatchTesting || !filteredNodes.length"
+                      class="px-2.5 py-1 text-xs font-semibold rounded-lg border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/80 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+                      :title="'并发测试当前展示的 ' + filteredNodes.length + ' 个节点延迟'">
+                <i class="fa-solid" :class="isBatchTesting ? 'fa-spinner fa-spin' : 'fa-bolt-lightning text-amber-500'"></i>
+                <span>{{ isBatchTesting ? '测速中...' : '测速当前 (' + filteredNodes.length + ')' }}</span>
+              </button>
+
+              <!-- 按延迟从低到高排序切换 -->
+              <button @click="sortByLatency = !sortByLatency" 
+                      type="button"
+                      :class="sortByLatency ? 'bg-sky-600 text-white font-bold border-sky-600' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'"
+                      class="px-2.5 py-1 text-xs font-medium rounded-lg border transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                      :title="sortByLatency ? '取消按延迟排序' : '按测试延迟从低到高排序'">
+                <i class="fa-solid fa-arrow-down-short-wide text-[11px]"></i>
+                <span>延迟排序</span>
+              </button>
+
               <!-- 平铺节点独立折叠收起/展开按钮 -->
               <button @click="togglePhysicalCollapse" 
                       type="button"
-                      class="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 shadow-2xs">
+                      class="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer">
                 <i class="fa-solid text-[10px] text-sky-500" :class="isPhysicalCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
                 <span>{{ isPhysicalCollapsed ? '展开平铺节点 (' + nodes.length + ')' : '折叠平铺节点' }}</span>
               </button>
@@ -241,7 +432,7 @@ export default {
                class="cursor-pointer p-3.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/30 hover:bg-slate-100/60 dark:hover:bg-slate-900/60 transition flex items-center justify-between">
             <div class="flex items-center gap-2.5 text-xs text-slate-500 dark:text-slate-400">
               <i class="fa-solid fa-boxes-stacked text-sky-500"></i>
-              <span>物理透传节点已折叠收起（共 {{ nodes.length }} 个节点平铺在客户端 PROXY 选择器后段）。点击即可展开筛选查看。</span>
+              <span>物理透传节点已折叠收起（共 {{ nodes.length }} 个节点平铺在客户端 PROXY 选择器后段）。点击即可展开并支持实时测速。</span>
             </div>
             <span class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1">
               展开平铺节点 ({{ nodes.length }}) <i class="fa-solid fa-chevron-down text-[10px]"></i>
@@ -254,13 +445,13 @@ export default {
             <div class="flex items-center gap-1.5 flex-wrap pt-1">
               <button @click="selectedCountry = 'ALL'" 
                       :class="selectedCountry === 'ALL' ? 'bg-sky-600 text-white font-bold' : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                      class="px-2.5 py-1 text-xs rounded-full font-mono transition">
+                      class="px-2.5 py-1 text-xs rounded-full font-mono transition cursor-pointer">
                 全部 ({{ nodes.length }})
               </button>
               <button v-for="(count, cc) in countryStats" :key="cc" 
                       @click="selectedCountry = cc"
                       :class="selectedCountry === cc ? 'bg-sky-600 text-white font-bold' : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                      class="px-2.5 py-1 text-xs rounded-full font-mono transition flex items-center gap-1">
+                      class="px-2.5 py-1 text-xs rounded-full font-mono transition flex items-center gap-1 cursor-pointer">
                 <span>{{ getCountryFlag(cc) }}</span>
                 <span>{{ cc }} ({{ count }})</span>
               </button>
@@ -285,8 +476,25 @@ export default {
                     {{ node.display_name }}
                   </div>
                 </div>
-                <div class="text-[11px] font-mono text-slate-400 dark:text-slate-500 truncate">
-                  {{ node.server }}:{{ node.port }}
+
+                <!-- 底部信息行：服务器地址 + 实时测速微标签 -->
+                <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] font-mono gap-1">
+                  <span class="text-slate-400 dark:text-slate-500 truncate max-w-[125px]" :title="node.server + ':' + node.port">
+                    {{ node.server }}:{{ node.port }}
+                  </span>
+
+                  <!-- 单节点延迟测速按钮 -->
+                  <button @click.stop="pingSingleNode(node)"
+                          type="button"
+                          :disabled="isTestingNode(node.id)"
+                          :title="isTestingNode(node.id) ? '正在测速...' : '点击测试此节点握手延迟'"
+                          class="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono transition flex items-center gap-1 border shadow-2xs cursor-pointer shrink-0"
+                          :class="getLatencyBadgeClass(node.id)">
+                    <i v-if="isTestingNode(node.id)" class="fa-solid fa-spinner fa-spin text-[9px]"></i>
+                    <i v-else-if="getNodeLatency(node.id) !== null" class="fa-solid fa-bolt text-[9px]"></i>
+                    <i v-else class="fa-regular fa-clock text-[9px]"></i>
+                    <span>{{ formatNodeLatency(node.id) }}</span>
+                  </button>
                 </div>
               </div>
             </div>

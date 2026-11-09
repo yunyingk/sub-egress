@@ -7,7 +7,7 @@ export default {
   },
   props: {
     syncing: { type: Boolean, default: false },
-    version: { type: String, default: 'v0.2.10' }
+    version: { type: String, default: 'v0.2.11' }
   },
   emits: ['openSettings', 'refreshAll'],
   template: `
