@@ -11,23 +11,99 @@ DEFAULT_DNS_CONFIG = {
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
     "use-hosts": True,
+    "respect-rules": True,
     "default-nameserver": ["223.5.5.5", "119.29.29.29"],
-    "nameserver": ["223.5.5.5", "119.29.29.29", "114.114.114.114"],
+    "nameserver": [
+        "223.5.5.5",
+        "119.29.29.29",
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query"
+    ],
+    "nameserver-policy": {
+        "geosite:cn": ["223.5.5.5", "119.29.29.29"],
+        "+.hosecloud.com": ["223.5.5.5", "119.29.29.29"],
+        "+.ekuaibao.com": ["223.5.5.5", "119.29.29.29"]
+    },
     "fake-ip-filter": [
         "*.lan", "*.local", "*.localhost", "*.test",
-        "+.stun.*", "+.msftncsi.com", "+.msftconnecttest.com"
+        "+.stun.*", "+.msftncsi.com", "+.msftconnecttest.com",
+        "*.ying-qing.cn", "ying-qing.cn"
     ]
 }
 
+DEFAULT_SNIFFER_CONFIG = {
+    "enable": True,
+    "parse-pure-ip": True,
+    "sniff": {
+        "HTTP": {
+            "ports": [80, "8080-8880"],
+            "override-destination": True
+        },
+        "TLS": {
+            "ports": [443, 8443],
+            "override-destination": True
+        }
+    }
+}
+
 DEFAULT_RULES = [
+    # 1. 基础广告过滤
+    "GEOSITE,category-ads-all,REJECT",
+    # 2. 阻断 UDP 443 (防 QUIC 降级与探测泄露)
+    "AND,((NETWORK,udp),(DST-PORT,443)),REJECT",
+    # 3. 阻断 WebRTC STUN 泄露
+    "DOMAIN-KEYWORD,stun,REJECT",
+    "AND,((NETWORK,udp),(DST-PORT,3478)),REJECT",
+    # 4. 私网及局域网直连 (避免 fake-ip 劫持局域网通信)
     "DOMAIN-SUFFIX,local,DIRECT",
     "DOMAIN-SUFFIX,localhost,DIRECT",
+    "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
     "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
-    "IP-CIDR,17.0.0.0/8,DIRECT,no-resolve",
     "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
     "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
-    "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+    "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+    "IP-CIDR6,::1/128,DIRECT,no-resolve",
+    "IP-CIDR6,fc00::/7,DIRECT,no-resolve",
+    "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+    # 5. 个人域名与内网服务直连
+    "DOMAIN-SUFFIX,ying-qing.cn,DIRECT",
+    # 6. 常用邮件端口直连 (防代理拦截或账号风控)
+    "DST-PORT,25,DIRECT",
+    "DST-PORT,465,DIRECT",
+    "DST-PORT,587,DIRECT",
+    "DST-PORT,110,DIRECT",
+    "DST-PORT,143,DIRECT",
+    "DST-PORT,993,DIRECT",
+    "DST-PORT,995,DIRECT",
+    # 7. 重点 AI 域名与风控服务精准走 PROXY 主选择器
+    "DOMAIN-SUFFIX,anthropic.com,PROXY",
+    "DOMAIN-SUFFIX,claude.ai,PROXY",
+    "DOMAIN-SUFFIX,claude.com,PROXY",
+    "DOMAIN-SUFFIX,claudeusercontent.com,PROXY",
+    "DOMAIN-SUFFIX,statsigapi.net,PROXY",
+    "IP-CIDR,160.79.104.0/21,PROXY,no-resolve",
+    "DOMAIN-SUFFIX,openai.com,PROXY",
+    "DOMAIN-SUFFIX,chatgpt.com,PROXY",
+    "DOMAIN-SUFFIX,oaistatic.com,PROXY",
+    "DOMAIN-SUFFIX,oaiusercontent.com,PROXY",
+    "DOMAIN-SUFFIX,arkoselabs.com,PROXY",
+    "DOMAIN-KEYWORD,arkose,PROXY",
+    "DOMAIN,challenges.cloudflare.com,PROXY",
+    "DOMAIN-SUFFIX,statsig.com,PROXY",
+    "DOMAIN-SUFFIX,featuregates.org,PROXY",
+    "DOMAIN-SUFFIX,gemini.google.com,PROXY",
+    "DOMAIN-SUFFIX,x.ai,PROXY",
+    "DOMAIN-SUFFIX,grok.com,PROXY",
+    "DOMAIN-SUFFIX,perplexity.ai,PROXY",
+    # 8. IP 与 DNS 泄露检测站点
+    "DOMAIN-SUFFIX,browserleaks.com,PROXY",
+    "DOMAIN-SUFFIX,ipleak.net,PROXY",
+    "DOMAIN-SUFFIX,dnsleaktest.com,PROXY",
+    # 9. 中国大陆网站与 IP 直连
+    "GEOSITE,cn,DIRECT",
     "GEOIP,CN,DIRECT",
+    # 10. 全局兜底
     "MATCH,PROXY"
 ]
 
@@ -116,15 +192,22 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
     return groups
 
 
-def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
+def build_clash_config(
+    raw_nodes: List[Dict[str, Any]],
+    mixed_port: int = 7897,
+    terminal_port: int = 7898
+) -> str:
     """
-    Builds a clean, single-selector Mihomo / ClashMeta YAML configuration.
+    Builds a clean, production-grade Mihomo / ClashMeta YAML configuration with:
+    - Primary mixed port (default 7897) for general traffic & TUN
+    - Secondary listeners mixed port (default 7898) directly bound to '终端-日本' fallback group for terminal traffic (px-7898)
+    - Full DNS fallback, pure-IP sniffer, anti-leak rules and single-selector PROXY control.
     """
     if not raw_nodes:
         dummy_node = {"name": "DIRECT", "type": "direct"}
         config = {
-            "mixed-port": 7890,
-            "allow-lan": False,
+            "mixed-port": mixed_port,
+            "allow-lan": True,
             "mode": "rule",
             "log-level": "info",
             "proxies": [dummy_node],
@@ -135,6 +218,7 @@ def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
 
     proxies_list: List[Dict[str, Any]] = []
     pass_through_names: List[str] = []
+    japan_node_names: List[str] = []
 
     for item in raw_nodes:
         node_cfg = copy.deepcopy(item.get("config_json", {}))
@@ -142,6 +226,8 @@ def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
         node_cfg["name"] = display_name
         proxies_list.append(node_cfg)
         pass_through_names.append(display_name)
+        if (item.get("country_code") or "").upper() == "JP":
+            japan_node_names.append(display_name)
 
     dyn_groups = extract_dynamic_groups(raw_nodes)
     dynamic_options = [g["name"] for g in dyn_groups]
@@ -158,25 +244,59 @@ def build_clash_config(raw_nodes: List[Dict[str, Any]]) -> str:
             grp["tolerance"] = g["tolerance"]
         proxy_groups.append(grp)
 
-    # 主选择器 PROXY: 动态策略组置顶 + 全部透传节点平铺
-    main_selector_proxies = [*dynamic_options, *pass_through_names]
+    # 构造双端口机制专用的【终端-日本】策略组 (fallback)
+    # 优先日本最佳低延迟动态组，备选平铺所有日本物理节点；若无日本节点则优雅回退 PROXY
+    jp_dyn_group = next((g["name"] for g in dyn_groups if g.get("country_code") == "JP"), None)
+    terminal_jp_proxies = []
+    if jp_dyn_group:
+        terminal_jp_proxies.append(jp_dyn_group)
+    for jn in japan_node_names:
+        if jn not in terminal_jp_proxies:
+            terminal_jp_proxies.append(jn)
+    if not terminal_jp_proxies:
+        terminal_jp_proxies = ["PROXY"]
+
+    terminal_group = {
+        "name": "终端-日本",
+        "type": "fallback",
+        "url": "https://www.gstatic.com/generate_204",
+        "interval": 60,
+        "proxies": terminal_jp_proxies
+    }
+
+    # 主选择器 PROXY: 终端-日本组 + 动态策略组置顶 + 全部透传节点平铺
+    main_selector_proxies = ["终端-日本", *dynamic_options, *pass_through_names]
     main_selector = {
         "name": "PROXY",
         "type": "select",
         "proxies": main_selector_proxies
     }
 
-    full_groups = [main_selector, *proxy_groups]
+    full_groups = [main_selector, terminal_group, *proxy_groups]
+
+    listeners = [
+        {
+            "name": f"terminal-jp-{terminal_port}",
+            "type": "mixed",
+            "listen": "127.0.0.1",
+            "port": terminal_port,
+            "udp": False,
+            "proxy": "终端-日本"
+        }
+    ]
 
     config = {
-        "mixed-port": 7890,
-        "allow-lan": False,
+        "mixed-port": mixed_port,
+        "allow-lan": True,
         "mode": "rule",
         "log-level": "info",
         "ipv6": False,
         "unified-delay": True,
         "tcp-concurrent": True,
         "find-process-mode": "strict",
+        "profile": {"store-selected": True},
+        "sniffer": DEFAULT_SNIFFER_CONFIG,
+        "listeners": listeners,
         "dns": DEFAULT_DNS_CONFIG,
         "proxies": proxies_list,
         "proxy-groups": full_groups,

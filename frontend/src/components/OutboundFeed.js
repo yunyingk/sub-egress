@@ -173,6 +173,7 @@ export default {
           </div>
           <ul class="space-y-1.5 pl-4 list-disc text-slate-500 dark:text-slate-400">
             <li><strong class="text-slate-700 dark:text-slate-300">纯粹二元制</strong>：局域网与国内直连 (DIRECT)，外网流量一律归口 PROXY 主选择器。</li>
+            <li><strong class="text-slate-700 dark:text-slate-300">原生双端口</strong>：主端口 7897 (TUN/全流量，走 PROXY 家宽)，副端口 7898 (终端专属，直达『终端-日本』，供 px-7898 免 Merge 使用)。</li>
             <li><strong class="text-slate-700 dark:text-slate-300">[动态·日区] 🇯🇵</strong>：锁定同国低延迟测速，绝不跨国乱跳。</li>
             <li><strong class="text-slate-700 dark:text-slate-300">[动态·家宽] 🇺🇸</strong>：锁定纯净住宅 IP 主备容灾，绝不混入机房 IP。</li>
             <li><strong class="text-slate-700 dark:text-slate-300">物理透传平铺</strong>：物理节点直白平铺，单一节点完全由客户端自由指定。</li>

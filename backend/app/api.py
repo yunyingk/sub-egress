@@ -26,7 +26,9 @@ DEFAULT_SETTINGS = {
     "default_target": "clash",
     "update_interval": "12",
     "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
-    "subscription_title": "sub-egress"
+    "subscription_title": "sub-egress",
+    "clash_mixed_port": "7897",
+    "clash_terminal_port": "7898"
 }
 
 async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
@@ -123,7 +125,9 @@ async def export_subscription(
         media_type = "text/plain; charset=utf-8"
         filename = "sub-egress.txt"
     else:
-        content = build_clash_config(raw_nodes)
+        mixed_port = int(settings.get("clash_mixed_port", "7897") or 7897)
+        terminal_port = int(settings.get("clash_terminal_port", "7898") or 7898)
+        content = build_clash_config(raw_nodes, mixed_port=mixed_port, terminal_port=terminal_port)
         media_type = "application/yaml; charset=utf-8"
         filename = "sub-egress-clash.yaml"
 
@@ -156,6 +160,8 @@ class SettingsPayload(BaseModel):
     update_interval: Optional[str] = None
     write_api_token: Optional[str] = None
     subscription_title: Optional[str] = None
+    clash_mixed_port: Optional[str] = None
+    clash_terminal_port: Optional[str] = None
 
 @router.get("/api/settings", summary="获取全局读写与安全设置")
 async def get_settings(db: AsyncSession = Depends(get_db)):
@@ -166,7 +172,9 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "default_target": settings.get("default_target", "clash"),
         "update_interval": settings.get("update_interval", "12"),
         "write_api_token": settings.get("write_api_token", ""),
-        "subscription_title": settings.get("subscription_title", "sub-egress")
+        "subscription_title": settings.get("subscription_title", "sub-egress"),
+        "clash_mixed_port": settings.get("clash_mixed_port", "7897"),
+        "clash_terminal_port": settings.get("clash_terminal_port", "7898")
     }
 
 @router.post("/api/settings", summary="保存全局读写设置")
@@ -184,6 +192,10 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
         updates["write_api_token"] = payload.write_api_token.strip()
     if payload.subscription_title is not None:
         updates["subscription_title"] = payload.subscription_title.strip()
+    if payload.clash_mixed_port is not None:
+        updates["clash_mixed_port"] = str(payload.clash_mixed_port).strip()
+    if payload.clash_terminal_port is not None:
+        updates["clash_terminal_port"] = str(payload.clash_terminal_port).strip()
 
     for k, v in updates.items():
         stmt = select(Setting).where(Setting.key == k)

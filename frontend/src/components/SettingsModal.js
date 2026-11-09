@@ -13,7 +13,10 @@ export default {
 
     watch(() => props.visible, (val) => {
       if (val) {
-        editSettings.value = JSON.parse(JSON.stringify(props.settings));
+        const copy = JSON.parse(JSON.stringify(props.settings || {}));
+        if (!copy.clash_mixed_port) copy.clash_mixed_port = '7897';
+        if (!copy.clash_terminal_port) copy.clash_terminal_port = '7898';
+        editSettings.value = copy;
       }
     });
 
@@ -92,6 +95,31 @@ export default {
             <p class="text-[11px] text-slate-500 dark:text-slate-400 mb-2">导入到 Clash Verge、Mihomo、Sing-box 客户端卡片顶部呈现的精致名称。</p>
             <input v-model="editSettings.subscription_title" type="text" placeholder="例如: sub-egress 出站聚合中枢"
                    class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+
+          <!-- Clash 原生双端口监听机制 (Dual-Port Listeners) -->
+          <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-xs font-bold text-slate-800 dark:text-slate-200 block">Clash 双端口机制 (Dual-Port Listeners)</span>
+                <span class="text-[11px] text-slate-500 dark:text-slate-400 block">原生下发双端口，主端口走 PROXY，副端口绑定『终端-日本』供命令行高速直连。</span>
+              </div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 font-semibold">原生直下</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">主混合端口 (Mixed Port)</label>
+                <input v-model="editSettings.clash_mixed_port" type="number" placeholder="7897"
+                       class="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
+                <span class="text-[10px] text-slate-400 dark:text-slate-500">主流量/TUN (px-home 默认 7897)</span>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">终端副端口 (Terminal Port)</label>
+                <input v-model="editSettings.clash_terminal_port" type="number" placeholder="7898"
+                       class="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
+                <span class="text-[10px] text-slate-400 dark:text-slate-500">终端高速走日本 (px-7898 默认 7898)</span>
+              </div>
+            </div>
           </div>
 
           <!-- 默认导出内核 -->
