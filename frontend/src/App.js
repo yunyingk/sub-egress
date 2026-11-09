@@ -17,7 +17,6 @@ export default {
     AddSourceModal
   },
   setup() {
-    const isDark = ref(false);
     const sources = ref([]);
     const nodes = ref([]);
     const syncing = ref(false);
@@ -38,29 +37,6 @@ export default {
     // 添加源状态
     const showAddModal = ref(false);
     const creatingSource = ref(false);
-
-    // 主题逻辑：默认明亮白色，记忆在 localStorage
-    const initTheme = () => {
-      const savedTheme = localStorage.getItem('sub_egress_theme') || 'light';
-      isDark.value = (savedTheme === 'dark');
-      applyTheme();
-    };
-
-    const toggleTheme = () => {
-      isDark.value = !isDark.value;
-      localStorage.setItem('sub_egress_theme', isDark.value ? 'dark' : 'light');
-      applyTheme();
-    };
-
-    const applyTheme = () => {
-      if (isDark.value) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.remove('light');
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.documentElement.classList.add('light');
-      }
-    };
 
     // 数据加载
     const fetchSources = async () => {
@@ -180,15 +156,12 @@ export default {
     };
 
     onMounted(() => {
-      initTheme();
       fetchSources();
       fetchNodes();
       fetchSettings();
     });
 
     return {
-      isDark,
-      toggleTheme,
       sources,
       nodes,
       syncing,
@@ -209,9 +182,7 @@ export default {
   template: `
     <div class="max-w-7xl mx-auto px-4 py-8">
       <Navbar 
-        :is-dark="isDark" 
         :syncing="syncing"
-        @toggle-theme="toggleTheme" 
         @open-settings="showSettingsModal = true" 
         @refresh-all="refreshAll" 
       />

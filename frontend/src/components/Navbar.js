@@ -1,11 +1,15 @@
+import ThemeToggle from './ThemeToggle.js';
+
 export default {
   name: 'Navbar',
-  props: {
-    isDark: { type: Boolean, default: false },
-    syncing: { type: Boolean, default: false },
-    version: { type: String, default: 'v0.2.6' }
+  components: {
+    ThemeToggle
   },
-  emits: ['toggleTheme', 'openSettings', 'refreshAll'],
+  props: {
+    syncing: { type: Boolean, default: false },
+    version: { type: String, default: 'v0.2.7' }
+  },
+  emits: ['openSettings', 'refreshAll'],
   template: `
     <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 mb-8 border-b border-slate-200 dark:border-slate-800 gap-4">
       <div>
@@ -27,13 +31,8 @@ export default {
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
-        <!-- 黑白主题切换 -->
-        <button @click="$emit('toggleTheme')" 
-                class="px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-xs transition-all flex items-center gap-2"
-                :title="isDark ? '切换至明亮模式' : '切换至暗黑模式'">
-          <i :class="isDark ? 'fa-solid fa-sun text-amber-400' : 'fa-solid fa-moon text-slate-600'"></i>
-          <span class="text-xs">{{ isDark ? '浅色模式' : '深色模式' }}</span>
-        </button>
+        <!-- 现代主流外观切换组件 (浅色 / 深色 / 跟随系统) -->
+        <ThemeToggle />
 
         <!-- 读写与安全设置 -->
         <button @click="$emit('openSettings')" 

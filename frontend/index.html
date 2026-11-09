@@ -38,6 +38,21 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
   </style>
   <script>
+    // 立即初始化外观 (浅色 / 深色 / 跟随系统)，避免页面闪烁
+    (function() {
+      try {
+        const savedMode = localStorage.getItem('sub_egress_theme_mode') || localStorage.getItem('sub_egress_theme') || 'system';
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (savedMode === 'dark' || (savedMode === 'system' && prefersDark)) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        }
+      } catch (e) {}
+    })();
+
     // 强制注销历史遗留的 Sub-Store PWA Service Worker 缓存
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(function(regs) {
