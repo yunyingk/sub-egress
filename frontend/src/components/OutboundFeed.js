@@ -9,15 +9,34 @@ export default {
   emits: ['update:selectedTarget', 'openSettings'],
   setup(props, { emit }) {
     const copied = ref(false);
+    const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
+
+    const onNameChange = () => {
+      if (customName.value && customName.value.trim()) {
+        localStorage.setItem('sub_egress_custom_name', customName.value.trim());
+      } else {
+        localStorage.removeItem('sub_egress_custom_name');
+      }
+    };
+
+    const defaultPlaceholder = computed(() => {
+      return props.settings.subscription_title || 'sub-egress';
+    });
 
     const activeSubscriptionUrl = computed(() => {
       const origin = window.location.origin;
       const token = props.settings.sub_hash_token;
       const target = props.selectedTarget;
-      if (token) {
-        return `${origin}/c/${token}?target=${target}`;
+      const params = new URLSearchParams();
+      params.append('target', target);
+      if (customName.value && customName.value.trim()) {
+        params.append('name', customName.value.trim());
       }
-      return `${origin}/feed?target=${target}`;
+      const queryStr = params.toString();
+      if (token) {
+        return `${origin}/c/${token}?${queryStr}`;
+      }
+      return `${origin}/feed?${queryStr}`;
     });
 
     const formatExt = computed(() => {
@@ -38,6 +57,9 @@ export default {
 
     return {
       copied,
+      customName,
+      onNameChange,
+      defaultPlaceholder,
       activeSubscriptionUrl,
       formatExt,
       copySubscriptionUrl,
@@ -80,6 +102,27 @@ export default {
               <i class="fa-solid fa-list-ul"></i> Base64 / URI
             </button>
           </div>
+        </div>
+
+        <!-- 自定义订阅卡片名称 (Profile Name) -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              客户端卡片名称 (Profile Name · 动态调节)
+            </label>
+            <span v-if="customName" @click="customName = ''; onNameChange()" class="cursor-pointer text-[11px] text-slate-400 hover:text-sky-500 flex items-center gap-1">
+              <i class="fa-solid fa-arrow-rotate-left"></i> 恢复默认
+            </span>
+          </div>
+          <div class="relative">
+            <i class="fa-solid fa-tag absolute left-3 top-2.5 text-xs text-slate-400"></i>
+            <input v-model="customName" @input="onNameChange" type="text" 
+                   :placeholder="defaultPlaceholder"
+                   class="w-full pl-8 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500 font-medium">
+          </div>
+          <p class="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+            导入 Clash Verge / Mihomo 时将直接以此纯文本命名卡片（无任何 .yaml 文件后缀）。
+          </p>
         </div>
 
         <!-- 订阅链接展示区 -->

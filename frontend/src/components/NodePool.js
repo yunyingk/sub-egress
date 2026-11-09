@@ -8,7 +8,7 @@ export default {
   },
   setup(props) {
     const isMasterCollapsed = ref(localStorage.getItem('sub_egress_nodepool_master_collapsed') === 'true');
-    const isPhysicalCollapsed = ref(localStorage.getItem('sub_egress_nodepool_physical_collapsed') === 'true');
+    const isPhysicalCollapsed = ref(localStorage.getItem('sub_egress_nodepool_physical_collapsed') !== 'false');
     const searchQuery = ref('');
     const selectedCountry = ref('ALL');
     const selectedGroup = ref(null);

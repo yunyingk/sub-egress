@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
     "default_target": "clash",
     "update_interval": "12",
     "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
-    "subscription_title": "sub-egress 出站聚合中枢"
+    "subscription_title": "sub-egress"
 }
 
 async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
@@ -55,6 +55,8 @@ async def export_subscription(
     token: Optional[str] = None,
     target: Optional[str] = Query(None, description="目标客户端内核: clash, sing-box, base64"),
     type: Optional[str] = Query(None, description="别名目标内核: clash, sing-box, base64"),
+    name: Optional[str] = Query(None, description="自定义订阅卡片名称 (显示在客户端)"),
+    title: Optional[str] = Query(None, description="自定义订阅卡片名称 (别名)"),
     t: Optional[str] = Query(None, description="Query 传递的安全令牌 (用于 /feed)"),
     db: AsyncSession = Depends(get_db)
 ):
@@ -123,14 +125,16 @@ async def export_subscription(
         media_type = "application/yaml; charset=utf-8"
         filename = "sub-egress-clash.yaml"
 
-    sub_title = settings.get("subscription_title", "sub-egress 出站聚合中枢")
+    sub_title = (name or title or settings.get("subscription_title") or "sub-egress").strip()
     b64_title = "base64:" + base64.b64encode(sub_title.encode("utf-8")).decode("utf-8")
-    encoded_fn = urllib.parse.quote(f"{sub_title}.yaml" if final_target == "clash" else filename)
+    encoded_fn = urllib.parse.quote(sub_title)
+    ascii_safe_title = sub_title.encode('ascii', 'ignore').decode('ascii').strip() or "sub-egress"
 
     headers = {
         "Content-Type": media_type,
-        "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_fn}',
+        "Content-Disposition": f'attachment; filename*=UTF-8\'\'{encoded_fn}; filename="{ascii_safe_title}"',
         "profile-title": b64_title,
+        "Profile-Title": b64_title,
         "subscription-title": b64_title,
         "profile-update-interval": interval,
         "profile-web-page-url": "https://sub.ying-qing.cn",
@@ -160,7 +164,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "default_target": settings.get("default_target", "clash"),
         "update_interval": settings.get("update_interval", "12"),
         "write_api_token": settings.get("write_api_token", ""),
-        "subscription_title": settings.get("subscription_title", "sub-egress 出站聚合中枢")
+        "subscription_title": settings.get("subscription_title", "sub-egress")
     }
 
 @router.post("/api/settings", summary="保存全局读写设置")
