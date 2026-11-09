@@ -88,7 +88,10 @@ export default {
       if (testingNodeIds.value.has(node.id)) return;
       testingNodeIds.value.add(node.id);
       try {
-        const resp = await fetch(`/api/nodes/${node.id}/ping`, { method: 'POST' });
+        const resp = await fetch(`/api/nodes/${node.id}/ping`, { 
+          method: 'POST',
+          credentials: 'include'
+        });
         if (resp.ok) {
           const data = await resp.json();
           nodeLatencies.value = {
@@ -128,6 +131,7 @@ export default {
       try {
         const resp = await fetch('/api/nodes/ping', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ node_ids: ids })
         });
@@ -355,8 +359,7 @@ export default {
               <div>
                 <div class="flex items-center justify-between gap-1 text-xs">
                   <span class="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5" :title="grp.name">
-                    <span>{{ grp.country_flag }}</span>
-                    <span>{{ grp.name.replace(/\\[动态·[^\\]]+\\]\\s*/, '') }}</span>
+                    <span>{{ grp.name }}</span>
                   </span>
                   <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase"
                         :class="grp.type === 'fallback' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'">
@@ -391,10 +394,10 @@ export default {
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-sky-500"></span>
               <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                平铺物理透传节点池 (Physical Pass-Through Nodes)
+                物理节点池 (Physical Nodes)
               </h4>
               <span class="text-[11px] text-slate-400 font-mono">
-                共 {{ nodes.length }} 节点已直白平铺
+                共 {{ nodes.length }} 真实物理节点
               </span>
             </div>
 

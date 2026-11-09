@@ -28,7 +28,10 @@ DEFAULT_SETTINGS = {
     "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
     "subscription_title": "sub-egress",
     "clash_mixed_port": "7897",
-    "clash_terminal_port": "7898"
+    "clash_terminal_port": "7898",
+    "custom_direct_domains": "ying-qing.cn",
+    "custom_nameserver_policy": '{"geosite:cn": ["223.5.5.5", "119.29.29.29"], "+.hosecloud.com": ["223.5.5.5", "119.29.29.29"], "+.ekuaibao.com": ["223.5.5.5", "119.29.29.29"]}',
+    "profile_web_url": ""
 }
 
 async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
@@ -56,6 +59,7 @@ async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
 @router.api_route("/c/{token}", methods=["GET", "HEAD"], summary="基于安全令牌的统一订阅调度端点")
 @router.api_route("/feed", methods=["GET", "HEAD"], summary="标准统一订阅调度端点")
 async def export_subscription(
+    request: Request,
     token: Optional[str] = None,
     target: Optional[str] = Query(None, description="目标客户端内核: clash, sing-box, base64"),
     type: Optional[str] = Query(None, description="别名目标内核: clash, sing-box, base64"),
@@ -127,7 +131,19 @@ async def export_subscription(
     else:
         mixed_port = int(settings.get("clash_mixed_port", "7897") or 7897)
         terminal_port = int(settings.get("clash_terminal_port", "7898") or 7898)
-        content = build_clash_config(raw_nodes, mixed_port=mixed_port, terminal_port=terminal_port)
+        custom_direct_domains = [d.strip() for d in settings.get("custom_direct_domains", "").split(",") if d.strip()]
+        try:
+            custom_nameserver_policy = json.loads(settings.get("custom_nameserver_policy", "{}"))
+        except Exception:
+            custom_nameserver_policy = None
+
+        content = build_clash_config(
+            raw_nodes,
+            mixed_port=mixed_port,
+            terminal_port=terminal_port,
+            custom_direct_domains=custom_direct_domains,
+            custom_nameserver_policy=custom_nameserver_policy
+        )
         media_type = "application/yaml; charset=utf-8"
         filename = "sub-egress-clash.yaml"
 
@@ -136,6 +152,11 @@ async def export_subscription(
     encoded_fn = urllib.parse.quote(sub_title)
     ascii_safe_title = sub_title.encode('ascii', 'ignore').decode('ascii').strip() or "sub-egress"
 
+    req_host = request.headers.get("host")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    default_base_url = f"{proto}://{req_host}" if req_host else "https://sub.ying-qing.cn"
+    profile_web_url = settings.get("profile_web_url") or default_base_url
+
     headers = {
         "Content-Type": media_type,
         "Content-Disposition": f'attachment; filename*=UTF-8\'\'{encoded_fn}; filename="{ascii_safe_title}"',
@@ -143,7 +164,7 @@ async def export_subscription(
         "Profile-Title": b64_title,
         "subscription-title": b64_title,
         "profile-update-interval": interval,
-        "profile-web-page-url": "https://sub.ying-qing.cn",
+        "profile-web-page-url": profile_web_url,
     }
     if total_max > 0:
         headers["subscription-userinfo"] = f"upload=0; download={total_used}; total={total_max}; expire={earliest_expire}"

@@ -1,7 +1,7 @@
 # sub-egress · 出站网关与多内核订阅调度中枢
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.14-blue.svg" alt="version">
+  <img src="https://img.shields.io/badge/version-0.2.15-blue.svg" alt="version">
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="python">
   <img src="https://img.shields.io/badge/framework-FastAPI-009688.svg" alt="FastAPI">
   <img src="https://img.shields.io/badge/database-PostgreSQL%20%7C%20SQLite-336791.svg" alt="Database">
@@ -16,31 +16,32 @@
 
 ## 🌟 核心设计理念 (Core Architecture)
 
-### 1. 极简二元制单一节点选择 (Binary Selector)
-大部分传统订阅转换器强制在服务端预设复杂臃肿的网站分流规则，导致客户端无法自主选择。`sub-egress` 坚持极简二元原则：
-- **局域网与国内直连**：`GEOIP, CN`、私有网段自动直连 (`DIRECT`)。
-- **全量外网代理**：所有境外流量一律汇聚到单一主选择器 `PROXY`。
-- **客户端绝对掌控**：用户在客户端点选哪个节点，全部外网流量就走哪个节点，清晰透明。
+### 1. 风格 B 双端口出站与绝对透明掌控 (Dual Ports & Direct Proxying)
+大部分传统订阅转换器强制在服务端预设复杂臃肿的网站分流规则，导致客户端无法自主选择。`sub-egress` 采用风格 B 双端口双出站体系：
+- **`[7897] 主出站`**：默认直通主端口，开箱预选 `[动态·家宽]`（纯净住宅 IP 智能主备），专为风控敏感的 AI 工具与主干业务设计。
+- **`[7898] 副出站`**：默认直通副端口（如通过 listeners 绑定），开箱预选 `[动态·日区]`（低延迟超大带宽），供日常高吞吐、大流量与流媒体场景自由取用。
+- **透明平铺调度**：两个出站组均完全平铺供应商专区、地区智能组以及物理单节点，随时在客户端自由点选切换。
+- **局域网与国内直连**：`GEOIP, CN`、私有网段自动直连 (`DIRECT`)，纯净极简。
 
-### 2. 边界隔离动态组 (Boundary-Isolated Dynamic Groups)
-为了防止传统自动化测试在故障时盲目“跨国漂移”导致业务会话中断，`sub-egress` 内置带硬边界的动态测试组：
-- **`[动态·日区] 🇯🇵 日本最佳低延迟`**：严格锁定同国节点测速，绝不跨区乱跳。
-- **`[动态·家宽] 🇺🇸 美国住宅智能主备`**：严格锁定纯净美国家宽节点，主备无缝切换，绝不混入机房 IP。
-- **`[动态·全局] 🌐 全网故障转移`**：全量可用节点的最终兜底。
-- **`[透传·{机场名}] ...`**：平铺所有物理节点，带有清晰前缀，方便客户端直接点选。
+### 2. 四层递进式节点管理体系 (4-Tier Hierarchy)
+- **第一层 · 双端口出站门神**：`[7897] 主出站` 与 `[7898] 副出站`，主副端口独立映射。
+- **第二层 · 供应商专区 (Source Groups)**：如 `[源·RE] 🇺🇸 RESIP 美国家宽专区`、`[源·SD] 🌐 SDK 机场全节点专区`，按机场聚合调度。
+- **第三层 · 边界隔离动态组 (Boundary-Isolated Dynamic Groups)**：如 `[动态·日区] 🇯🇵`、`[动态·家宽] 🇺🇸`、`[动态·全局] 🌐`，同国/同属性硬边界巡检，绝不跨区乱跳。
+- **第四层 · 物理单节点池 (Physical Nodes)**：彻底移除“透传”赘字，采用 `[两位供应商代码] 国旗 名字 协议 倍率` 极简规范（如 `[RE] 🇺🇸 美国-01 A 住宅主线`，`[SD] 🇯🇵 日本-01 S 1.0x`，台湾节点统一五星红旗 `🇨🇳`，全局单国旗渲染）。
 
 ### 3. 多内核原生支持 (ClashMeta + Sing-box)
 - **Mihomo / ClashMeta**：生成标准化精简 YAML 配置 (`?target=clash`)。
 - **Sing-box**：生成包含 DNS 独立解析、Mixed Inbound、Outbound Selector 与 Route 规则的完整 JSON (`?target=sing-box`)。
 - **Base64 / URI**：支持标准 Shadowsocks、VLESS Reality、Trojan、Hysteria2 节点链接串导出 (`?target=base64`)。
 
-### 4. 订阅安全 Hash 令牌与读写访问控制
+### 4. 纯粹通用与配置解耦 (100% Decoupled & Open Source)
+- 代码库 100% 通用，无任何私有域名或企业内部 DNS 硬编码。
+- 支持在管理后台动态注入自定义直连域名与 DNS 策略，订阅导出端点自动感应客户端请求 Host 头。
 - 下游订阅支持基于混淆 Hash Token 的专属端点：
   ```
-  https://sub.ying-qing.cn/c/<hash_token>?target=clash
-  https://sub.ying-qing.cn/c/<hash_token>?target=sing-box
+  https://<your-domain>/c/<hash_token>?target=clash
+  https://<your-domain>/c/<hash_token>?target=sing-box
   ```
-- 内置「读写设置」中心，支持强制安全令牌访问阻断公网探测，支持自定义管理写入 API Key。
 
 ---
 

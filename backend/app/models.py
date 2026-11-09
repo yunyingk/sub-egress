@@ -10,6 +10,7 @@ class Source(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(64), nullable=False, unique=True)
+    code = Column(String(8), default="", nullable=True)
     url = Column(Text, nullable=False)
     source_type = Column(String(32), default="auto")  # auto, remote_clash, remote_base64, local_yaml
     enabled = Column(Boolean, default=True, nullable=False)

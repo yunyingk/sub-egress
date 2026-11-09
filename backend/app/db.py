@@ -31,11 +31,12 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         
-        # 兼容已有数据库结构，平滑增补延迟字段
+        # 兼容已有数据库结构，平滑增补延迟字段与数据源代码
         if not DATABASE_URL.startswith("sqlite"):
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency DOUBLE PRECISION;"))
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_status VARCHAR(32);"))
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_updated_at TIMESTAMP;"))
+            await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS code VARCHAR(8);"))
         else:
             # SQLite 增补字段检测
             try:
@@ -47,6 +48,11 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE nodes ADD COLUMN latency_status TEXT;"))
                 if "latency_updated_at" not in cols:
                     await conn.execute(text("ALTER TABLE nodes ADD COLUMN latency_updated_at TIMESTAMP;"))
+                
+                s_res = await conn.execute(text("PRAGMA table_info(sources);"))
+                s_cols = [row[1] for row in s_res.fetchall()]
+                if "code" not in s_cols:
+                    await conn.execute(text("ALTER TABLE sources ADD COLUMN code TEXT;"))
             except Exception:
                 pass
 

@@ -11,7 +11,7 @@ AD_KEYWORDS = [
 COUNTRY_PATTERNS: List[Tuple[str, str, str]] = [
     ("🇭🇰", "HK", r"香港|hongkong|hk"),
     ("🇯🇵", "JP", r"日本|japan|jp|tokyo|osaka"),
-    ("🇹🇼", "TW", r"台湾|taiwan|tw|taipei"),
+    ("🇨🇳", "TW", r"台湾|taiwan|tw|taipei"),
     ("🇸🇬", "SG", r"新加坡|singapore|sg"),
     ("🇺🇸", "US", r"美国|united states|usa|us|america|los angeles|new york"),
     ("🇰🇷", "KR", r"韩国|korea|kr|seoul"),
@@ -36,6 +36,8 @@ COUNTRY_PATTERNS: List[Tuple[str, str, str]] = [
     ("🇦🇷", "AR", r"阿根廷|argentina|ar"),
     ("🇲🇽", "MX", r"墨西哥|mexico|mx"),
 ]
+
+ALL_FLAGS = [p[0] for p in COUNTRY_PATTERNS] + ["🇹🇼", "🌐"]
 
 def is_ad_node(name: str) -> bool:
     if not name:

@@ -39,6 +39,39 @@ def clean_node_name(name: str) -> str:
     cleaned = re.sub(r"\s+", " ", name).strip()
     return cleaned
 
+def extract_source_code(source_name: str, explicit_code: Optional[str] = None) -> str:
+    if explicit_code and explicit_code.strip():
+        return explicit_code.strip().upper()[:4]
+    letters = re.findall(r'[A-Za-z]', source_name or "")
+    if len(letters) >= 2:
+        return (letters[0] + letters[1]).upper()
+    elif len(letters) == 1:
+        return (letters[0] + 'X').upper()
+    return "MY"
+
+def strip_all_flags(text: str) -> str:
+    """清理字符串中已有的所有国旗 emoji，避免重复出现两面旗帜"""
+    clean = re.sub(r'[\U0001F1E6-\U0001F1FF]{2}', '', text)
+    clean = clean.replace('🌐', '').strip()
+    return clean
+
+def format_clean_node_name(source_code: str, orig_name: str, flag: str, is_res: bool, idx: int, protocol_type: str) -> str:
+    base = strip_all_flags(orig_name).strip()
+    p_char = protocol_type[0].upper() if protocol_type else "S"
+    
+    # 针对美国家庭宽带节点的规范化
+    if is_res:
+        if "主线" in base:
+            return f"[{source_code}] {flag} 美国-01 {p_char} 住宅主线"
+        elif "备用" in base:
+            return f"[{source_code}] {flag} 美国-02 {p_char} 住宅备用"
+        else:
+            return f"[{source_code}] {flag} 美国-{idx:02d} {p_char} 住宅节点"
+            
+    # 针对普通机场节点，去除多余空白和前导符号
+    base = re.sub(r'^\s*[-_·]\s*', '', base)
+    return f"[{source_code}] {flag} {base}"
+
 async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
     stmt = select(Source).where(Source.id == source_id)
     result = await session.execute(stmt)
@@ -84,22 +117,23 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
         # Delete existing nodes for this source
         await session.execute(delete(Node).where(Node.source_id == source.id))
 
-        # Insert new parsed nodes with standard prefixes
-        for item in raw_nodes:
+        # Insert new parsed nodes with clean concise prefixes [XX]
+        source_code = getattr(source, "code", None) or extract_source_code(source.name)
+        source.code = source_code
+
+        for idx, item in enumerate(raw_nodes, 1):
             orig_name = str(item.get("name", "")).strip()
             flag, code = detect_country(orig_name)
             is_res = is_residential_node(orig_name, item)
+            ntype = str(item.get("type", "unknown"))
             
-            # Format display name: [透传·{source.name}] {flag} {cleaned_name}
-            # Remove duplicated country flag if already in orig_name to avoid 🇯🇵 🇯🇵
-            display_base = orig_name.replace(flag, "").strip()
-            display_name = f"[透传·{source.name}] {flag} {display_base}"
+            display_name = format_clean_node_name(source_code, orig_name, flag, is_res, idx, ntype)
 
             node_rec = Node(
                 source_id=source.id,
                 original_name=orig_name,
                 display_name=display_name,
-                node_type=item.get("type", "unknown"),
+                node_type=ntype,
                 server=str(item.get("server", "")),
                 port=int(item.get("port", 0)),
                 country_code=code,

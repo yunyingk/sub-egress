@@ -24,14 +24,11 @@ DEFAULT_DNS_CONFIG = {
         "https://dns.alidns.com/dns-query"
     ],
     "nameserver-policy": {
-        "geosite:cn": ["223.5.5.5", "119.29.29.29"],
-        "+.hosecloud.com": ["223.5.5.5", "119.29.29.29"],
-        "+.ekuaibao.com": ["223.5.5.5", "119.29.29.29"]
+        "geosite:cn": ["223.5.5.5", "119.29.29.29"]
     },
     "fake-ip-filter": [
         "*.lan", "*.local", "*.localhost", "*.test",
-        "+.stun.*", "+.msftncsi.com", "+.msftconnecttest.com",
-        "*.ying-qing.cn", "ying-qing.cn"
+        "+.stun.*", "+.msftncsi.com", "+.msftconnecttest.com"
     ]
 }
 
@@ -70,9 +67,7 @@ DEFAULT_RULES = [
     "IP-CIDR6,::1/128,DIRECT,no-resolve",
     "IP-CIDR6,fc00::/7,DIRECT,no-resolve",
     "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
-    # 5. 个人域名与内网服务直连
-    "DOMAIN-SUFFIX,ying-qing.cn,DIRECT",
-    # 6. 常用邮件端口直连 (防代理拦截或账号风控)
+    # 5. 常用邮件端口直连 (防代理拦截或账号风控)
     "DST-PORT,25,DIRECT",
     "DST-PORT,465,DIRECT",
     "DST-PORT,587,DIRECT",
@@ -80,42 +75,42 @@ DEFAULT_RULES = [
     "DST-PORT,143,DIRECT",
     "DST-PORT,993,DIRECT",
     "DST-PORT,995,DIRECT",
-    # 7. 重点 AI 域名与风控服务精准走 PROXY 主选择器
-    "DOMAIN-SUFFIX,anthropic.com,PROXY",
-    "DOMAIN-SUFFIX,claude.ai,PROXY",
-    "DOMAIN-SUFFIX,claude.com,PROXY",
-    "DOMAIN-SUFFIX,claudeusercontent.com,PROXY",
-    "DOMAIN-SUFFIX,statsigapi.net,PROXY",
-    "IP-CIDR,160.79.104.0/21,PROXY,no-resolve",
-    "DOMAIN-SUFFIX,openai.com,PROXY",
-    "DOMAIN-SUFFIX,chatgpt.com,PROXY",
-    "DOMAIN-SUFFIX,oaistatic.com,PROXY",
-    "DOMAIN-SUFFIX,oaiusercontent.com,PROXY",
-    "DOMAIN-SUFFIX,arkoselabs.com,PROXY",
-    "DOMAIN-KEYWORD,arkose,PROXY",
-    "DOMAIN,challenges.cloudflare.com,PROXY",
-    "DOMAIN-SUFFIX,statsig.com,PROXY",
-    "DOMAIN-SUFFIX,featuregates.org,PROXY",
-    "DOMAIN-SUFFIX,gemini.google.com,PROXY",
-    "DOMAIN-SUFFIX,x.ai,PROXY",
-    "DOMAIN-SUFFIX,grok.com,PROXY",
-    "DOMAIN-SUFFIX,perplexity.ai,PROXY",
-    # 8. IP 与 DNS 泄露检测站点
-    "DOMAIN-SUFFIX,browserleaks.com,PROXY",
-    "DOMAIN-SUFFIX,ipleak.net,PROXY",
-    "DOMAIN-SUFFIX,dnsleaktest.com,PROXY",
-    # 9. 中国大陆网站与 IP 直连
+    # 6. 重点 AI 域名与风控服务精准走主选择器
+    "DOMAIN-SUFFIX,anthropic.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,claude.ai,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,claude.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,claudeusercontent.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,statsigapi.net,__MAIN_PROXY__",
+    "IP-CIDR,160.79.104.0/21,__MAIN_PROXY__,no-resolve",
+    "DOMAIN-SUFFIX,openai.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,chatgpt.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,oaistatic.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,oaiusercontent.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,arkoselabs.com,__MAIN_PROXY__",
+    "DOMAIN-KEYWORD,arkose,__MAIN_PROXY__",
+    "DOMAIN,challenges.cloudflare.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,statsig.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,featuregates.org,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,gemini.google.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,x.ai,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,grok.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,perplexity.ai,__MAIN_PROXY__",
+    # 7. IP 与 DNS 泄露检测站点
+    "DOMAIN-SUFFIX,browserleaks.com,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,ipleak.net,__MAIN_PROXY__",
+    "DOMAIN-SUFFIX,dnsleaktest.com,__MAIN_PROXY__",
+    # 8. 中国大陆网站与 IP 直连
     "GEOSITE,cn,DIRECT",
     "GEOIP,CN,DIRECT",
-    # 10. 全局兜底
-    "MATCH,PROXY"
+    # 9. 全局兜底
+    "MATCH,__MAIN_PROXY__"
 ]
 
 DYNAMIC_REGIONS = [
     ("HK", "🇭🇰", "港区", "香港最佳低延迟"),
     ("JP", "🇯🇵", "日区", "日本最佳低延迟"),
     ("SG", "🇸🇬", "狮城", "新加坡最佳低延迟"),
-    ("TW", "🇹🇼", "台区", "台湾最佳低延迟"),
+    ("TW", "🇨🇳", "台区", "台湾最佳低延迟"),
     ("US", "🇺🇸", "美区", "美国最佳低延迟"),
     ("KR", "🇰🇷", "韩区", "韩国最佳低延迟"),
     ("GB", "🇬🇧", "英区", "英国最佳低延迟"),
@@ -131,12 +126,12 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
     if not raw_nodes:
         return []
 
-    pass_through_names = [item.get("display_name") for item in raw_nodes if item.get("display_name")]
+    pass_through_names = [item.get("display_name") or item.get("name") for item in raw_nodes if (item.get("display_name") or item.get("name"))]
     by_country: Dict[str, List[str]] = {}
     residential_names: List[str] = []
 
     for item in raw_nodes:
-        name = item.get("display_name")
+        name = item.get("display_name") or item.get("name")
         if not name:
             continue
         cc = (item.get("country_code") or "OTHER").upper()
@@ -196,17 +191,66 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
     return groups
 
 
+def extract_source_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    按供应商（根据节点前缀 [XX]）聚合生成供应商专属策略组。
+    """
+    import re
+    by_source: Dict[str, List[str]] = {}
+    for item in raw_nodes:
+        name = item.get("display_name") or item.get("name")
+        if not name:
+            continue
+        m = re.match(r'^\[([A-Za-z0-9]+)\]', name)
+        code = m.group(1).upper() if m else "OTHER"
+        by_source.setdefault(code, []).append(name)
+
+    source_groups = []
+    for code, n_names in by_source.items():
+        if not n_names:
+            continue
+        if code == "RE":
+            s_name = "[源·RE] 🇺🇸 RESIP 美国家宽专区"
+            s_type = "fallback"
+            s_flag = "🇺🇸"
+        elif code == "SD":
+            s_name = "[源·SD] 🌐 SDK 机场全节点专区"
+            s_type = "url-test"
+            s_flag = "🌐"
+        else:
+            s_name = f"[源·{code}] 🌐 供应商 {code} 专区"
+            s_type = "url-test"
+            s_flag = "🌐"
+        
+        source_groups.append({
+            "name": s_name,
+            "type": s_type,
+            "country_flag": s_flag,
+            "proxies": n_names,
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 50
+        })
+    return source_groups
+
+
 def build_clash_config(
     raw_nodes: List[Dict[str, Any]],
     mixed_port: int = 7897,
-    terminal_port: int = 7898
+    terminal_port: int = 7898,
+    custom_direct_domains: List[str] = None,
+    custom_nameserver_policy: Dict[str, Any] = None
 ) -> str:
     """
     Builds a clean, production-grade Mihomo / ClashMeta YAML configuration with:
-    - Primary mixed port (default 7897) for general traffic & TUN
-    - Secondary listeners mixed port (default 7898) directly bound to '终端-日本' fallback group for terminal traffic (px-7898)
-    - Full DNS fallback, pure-IP sniffer, anti-leak rules and single-selector PROXY control.
+    - Primary mixed port (default 7897) for general traffic & TUN bound to [{mixed_port}] 主出站
+    - Secondary listeners mixed port (default 7898) directly bound to [{terminal_port}] 副出站 (px-7898)
+    - Full four-layer pyramid hierarchy (Dual Ports -> Source Groups -> Dynamic Regions -> Physical Nodes)
+    - 100% decoupled from personal/corporate domains with dynamic rule injection.
     """
+    main_group_name = f"[{mixed_port}] 主出站"
+    terminal_group_name = f"[{terminal_port}] 副出站"
+
     if not raw_nodes:
         dummy_node = {"name": "DIRECT", "type": "direct"}
         config = {
@@ -215,28 +259,44 @@ def build_clash_config(
             "mode": "rule",
             "log-level": "info",
             "proxies": [dummy_node],
-            "proxy-groups": [{"name": "PROXY", "type": "select", "proxies": ["DIRECT"]}],
-            "rules": ["MATCH,PROXY"]
+            "proxy-groups": [
+                {"name": main_group_name, "type": "select", "proxies": ["DIRECT"]},
+                {"name": terminal_group_name, "type": "select", "proxies": ["DIRECT"]}
+            ],
+            "rules": [f"MATCH,{main_group_name}"]
         }
         return yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
 
     proxies_list: List[Dict[str, Any]] = []
     pass_through_names: List[str] = []
-    japan_node_names: List[str] = []
 
     for item in raw_nodes:
-        node_cfg = copy.deepcopy(item.get("config_json", {}))
-        display_name = item.get("display_name")
+        if "config_json" in item and isinstance(item["config_json"], dict):
+            node_cfg = copy.deepcopy(item["config_json"])
+        else:
+            node_cfg = copy.deepcopy(item)
+            # Remove helper metadata keys if any
+            for k in ["display_name", "country_code", "country_flag", "is_residential"]:
+                node_cfg.pop(k, None)
+
+        display_name = item.get("display_name") or item.get("name")
+        if not display_name:
+            continue
         node_cfg["name"] = display_name
         proxies_list.append(node_cfg)
         pass_through_names.append(display_name)
-        if (item.get("country_code") or "").upper() == "JP":
-            japan_node_names.append(display_name)
 
+    # 1. 地区低延迟智能动态组
     dyn_groups = extract_dynamic_groups(raw_nodes)
-    dynamic_options = [g["name"] for g in dyn_groups]
-    proxy_groups = []
-    for g in dyn_groups:
+    dyn_names = [g["name"] for g in dyn_groups]
+
+    # 2. 供应商专区组
+    src_groups = extract_source_groups(raw_nodes)
+    src_names = [g["name"] for g in src_groups]
+
+    # 格式化所有辅助策略组
+    sub_groups = []
+    for g in [*src_groups, *dyn_groups]:
         grp = {
             "name": g["name"],
             "type": g["type"],
@@ -246,46 +306,75 @@ def build_clash_config(
         }
         if "tolerance" in g:
             grp["tolerance"] = g["tolerance"]
-        proxy_groups.append(grp)
+        sub_groups.append(grp)
 
-    # 构造双端口机制专用的【终端-日本】策略组 (fallback)
-    # 优先日本最佳低延迟动态组，备选平铺所有日本物理节点；若无日本节点则优雅回退 PROXY
-    jp_dyn_group = next((g["name"] for g in dyn_groups if g.get("country_code") == "JP"), None)
-    terminal_jp_proxies = []
-    if jp_dyn_group:
-        terminal_jp_proxies.append(jp_dyn_group)
-    for jn in japan_node_names:
-        if jn not in terminal_jp_proxies:
-            terminal_jp_proxies.append(jn)
-    if not terminal_jp_proxies:
-        terminal_jp_proxies = ["PROXY"]
+    # 默认预选探测：主出站默认优先家宽；副出站默认优先日区
+    res_group_name = next((g["name"] for g in dyn_groups if "家宽" in g["name"]), None)
+    jp_group_name = next((g["name"] for g in dyn_groups if g.get("country_code") == "JP"), None)
 
-    terminal_group = {
-        "name": "终端-日本",
-        "type": "select",
-        "proxies": terminal_jp_proxies
-    }
+    # 构建主出站候选列表（美国家宽智能主备置顶）
+    main_proxies = []
+    if res_group_name:
+        main_proxies.append(res_group_name)
+    for name in [*src_names, *dyn_names, *pass_through_names]:
+        if name not in main_proxies:
+            main_proxies.append(name)
 
-    # 主选择器 PROXY: 终端-日本组 + 动态策略组置顶 + 全部透传节点平铺
-    main_selector_proxies = ["终端-日本", *dynamic_options, *pass_through_names]
     main_selector = {
-        "name": "PROXY",
+        "name": main_group_name,
         "type": "select",
-        "proxies": main_selector_proxies
+        "proxies": main_proxies or ["DIRECT"]
     }
 
-    full_groups = [main_selector, terminal_group, *proxy_groups]
+    # 构建副出站候选列表（日本最佳低延迟置顶）
+    terminal_proxies = []
+    if jp_group_name:
+        terminal_proxies.append(jp_group_name)
+    for name in [*src_names, *dyn_names, *pass_through_names]:
+        if name not in terminal_proxies:
+            terminal_proxies.append(name)
 
+    terminal_selector = {
+        "name": terminal_group_name,
+        "type": "select",
+        "proxies": terminal_proxies or ["DIRECT"]
+    }
+
+    full_groups = [main_selector, terminal_selector, *sub_groups]
+
+    # 构造双端口监听器
     listeners = [
         {
-            "name": f"terminal-jp-{terminal_port}",
+            "name": f"terminal-port-{terminal_port}",
             "type": "mixed",
             "listen": "127.0.0.1",
             "port": terminal_port,
             "udp": False,
-            "proxy": "终端-日本"
+            "proxy": terminal_group_name
         }
     ]
+
+    # 动态组装 DNS
+    dns_cfg = copy.deepcopy(DEFAULT_DNS_CONFIG)
+    if custom_direct_domains:
+        for dom in custom_direct_domains:
+            dom = dom.strip()
+            if dom:
+                dns_cfg["fake-ip-filter"].extend([f"*.{dom}", dom])
+
+    if custom_nameserver_policy:
+        dns_cfg["nameserver-policy"].update(custom_nameserver_policy)
+
+    # 动态组装 Rules
+    rules = []
+    if custom_direct_domains:
+        for dom in custom_direct_domains:
+            dom = dom.strip()
+            if dom:
+                rules.append(f"DOMAIN-SUFFIX,{dom},DIRECT")
+
+    for r in DEFAULT_RULES:
+        rules.append(r.replace("__MAIN_PROXY__", main_group_name))
 
     config = {
         "mixed-port": mixed_port,
@@ -299,10 +388,10 @@ def build_clash_config(
         "profile": {"store-selected": True},
         "sniffer": DEFAULT_SNIFFER_CONFIG,
         "listeners": listeners,
-        "dns": DEFAULT_DNS_CONFIG,
+        "dns": dns_cfg,
         "proxies": proxies_list,
         "proxy-groups": full_groups,
-        "rules": DEFAULT_RULES
+        "rules": rules
     }
 
     return yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
