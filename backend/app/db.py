@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
 from .models import Base
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -29,6 +30,25 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # 兼容已有数据库结构，平滑增补延迟字段
+        if not DATABASE_URL.startswith("sqlite"):
+            await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency DOUBLE PRECISION;"))
+            await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_status VARCHAR(32);"))
+            await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_updated_at TIMESTAMP;"))
+        else:
+            # SQLite 增补字段检测
+            try:
+                res = await conn.execute(text("PRAGMA table_info(nodes);"))
+                cols = [row[1] for row in res.fetchall()]
+                if "latency" not in cols:
+                    await conn.execute(text("ALTER TABLE nodes ADD COLUMN latency REAL;"))
+                if "latency_status" not in cols:
+                    await conn.execute(text("ALTER TABLE nodes ADD COLUMN latency_status TEXT;"))
+                if "latency_updated_at" not in cols:
+                    await conn.execute(text("ALTER TABLE nodes ADD COLUMN latency_updated_at TIMESTAMP;"))
+            except Exception:
+                pass
 
 async def get_db():
     async with AsyncSessionLocal() as session:

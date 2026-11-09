@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -39,6 +39,9 @@ class Node(Base):
     country_code = Column(String(16), default="OTHER", index=True)
     country_flag = Column(String(8), default="🌐")
     is_residential = Column(Boolean, default=False, index=True)
+    latency = Column(Float, nullable=True)
+    latency_status = Column(String(32), nullable=True)
+    latency_updated_at = Column(DateTime, nullable=True)
     config_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

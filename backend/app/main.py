@@ -7,23 +7,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .api import router
 from .db import init_db
-from .syncer import background_sync_worker
+from .syncer import background_ping_worker, background_sync_worker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB tables
     await init_db()
-    # Start background synchronization worker
-    worker_task = asyncio.create_task(background_sync_worker())
+    # Start background synchronization worker & ping worker
+    sync_task = asyncio.create_task(background_sync_worker())
+    ping_task = asyncio.create_task(background_ping_worker())
     try:
         yield
     finally:
-        worker_task.cancel()
+        sync_task.cancel()
+        ping_task.cancel()
 
 app = FastAPI(
     title="sub-egress",
     description="出站网关与订阅聚合调度中枢",
-    version="0.2.11",
+    version="0.2.12",
     lifespan=lifespan
 )
 

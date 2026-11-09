@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 import re
+import time
 from typing import Any, Dict, List, Optional
 import httpx
 from sqlalchemy import delete, select
@@ -142,3 +143,57 @@ async def background_sync_worker():
             pass
         # Refresh every 30 minutes
         await asyncio.sleep(1800)
+
+
+# ==================== 后端定时巡检与延迟测速工作者 ====================
+
+async def ping_single_node(host: str, port: int, node_type: str, timeout: float = 2.5) -> Dict[str, Any]:
+    t0 = time.perf_counter()
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        rtt = (time.perf_counter() - t0) * 1000.0
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return {"latency": round(rtt, 1), "status": "ok", "error": None}
+    except ConnectionRefusedError:
+        rtt = (time.perf_counter() - t0) * 1000.0
+        if node_type == "hysteria2":
+            return {"latency": round(rtt, 1), "status": "ok", "error": None}
+        return {"latency": round(rtt, 1), "status": "refused", "error": "Connection refused"}
+    except asyncio.TimeoutError:
+        return {"latency": None, "status": "timeout", "error": "Connection timed out"}
+    except Exception as e:
+        return {"latency": None, "status": "error", "error": str(e)}
+
+async def ping_all_nodes(timeout: float = 2.5, concurrency: int = 20):
+    async with AsyncSessionLocal() as session:
+        stmt = select(Node)
+        res = await session.execute(stmt)
+        nodes = res.scalars().all()
+        if not nodes:
+            return
+
+        sem = asyncio.Semaphore(concurrency)
+
+        async def worker(node: Node):
+            async with sem:
+                res = await ping_single_node(node.server, node.port, node.node_type, timeout=timeout)
+                node.latency = res["latency"]
+                node.latency_status = res["status"]
+                node.latency_updated_at = datetime.utcnow()
+
+        await asyncio.gather(*(worker(n) for n in nodes))
+        await session.commit()
+
+async def background_ping_worker():
+    # 启动等待 5 秒后执行首次全节点测速巡检，随后每 5 分钟 (300秒) 定时持续更新数据库
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await ping_all_nodes()
+        except Exception:
+            pass
+        await asyncio.sleep(300)

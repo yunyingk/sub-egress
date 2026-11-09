@@ -14,7 +14,7 @@ export default {
     const selectedGroup = ref(null);
     const sortByLatency = ref(false);
 
-    // 延迟测速状态管理
+    // 延迟测速状态管理（前端即时缓存 + 后端数据库双向联动）
     const initialLatencies = (() => {
       try {
         return JSON.parse(localStorage.getItem('sub_egress_node_latencies') || '{}');
@@ -34,22 +34,31 @@ export default {
 
     const isTestingNode = (id) => testingNodeIds.value.has(id);
 
+    // 优先读取前端即时测速结果，未手动测速时直接读取后端定时巡检任务入库的延迟数据
     const getNodeLatency = (id) => {
-      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
-      if (!item) return null;
-      return item.latency !== undefined ? item.latency : null;
+      const mem = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
+      if (mem && mem.latency !== undefined) return mem.latency;
+      const n = props.nodes.find(item => item.id === id);
+      return n && n.latency !== undefined ? n.latency : null;
+    };
+
+    const getNodeStatus = (id) => {
+      const mem = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
+      if (mem && mem.status) return mem.status;
+      const n = props.nodes.find(item => item.id === id);
+      return n ? n.latency_status : null;
     };
 
     const formatNodeLatency = (id) => {
       if (isTestingNode(id)) return '测速中...';
-      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
-      if (!item) return '测延迟';
-      if (item.latency !== null && item.latency !== undefined) {
-        return `${item.latency} ms`;
+      const lat = getNodeLatency(id);
+      if (lat !== null && lat !== undefined) {
+        return `${lat} ms`;
       }
-      if (item.status === 'timeout') return '超时';
-      if (item.status === 'refused') return '拒绝';
-      if (item.status) return '不可达';
+      const st = getNodeStatus(id);
+      if (st === 'timeout') return '超时';
+      if (st === 'refused') return '拒绝';
+      if (st && st !== 'ok') return '不可达';
       return '测延迟';
     };
 
@@ -57,11 +66,8 @@ export default {
       if (isTestingNode(id)) {
         return 'bg-sky-50 text-sky-600 border-sky-300 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800 animate-pulse';
       }
-      const item = nodeLatencies.value[id] || nodeLatencies.value[String(id)];
-      if (!item) {
-        return 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 hover:bg-sky-50 hover:text-sky-600 hover:border-sky-300 dark:hover:bg-sky-950 dark:hover:text-sky-300';
-      }
-      const lat = item.latency;
+      const lat = getNodeLatency(id);
+      const st = getNodeStatus(id);
       if (lat !== null && lat !== undefined) {
         if (lat < 250) {
           return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 hover:bg-emerald-100';
@@ -71,10 +77,13 @@ export default {
         }
         return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 hover:bg-amber-100';
       }
-      return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800 hover:bg-rose-100';
+      if (st && st !== 'ok') {
+        return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800 hover:bg-rose-100';
+      }
+      return 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 hover:bg-sky-50 hover:text-sky-600 hover:border-sky-300 dark:hover:bg-sky-950 dark:hover:text-sky-300';
     };
 
-    // 单节点测速
+    // 前端手动点测单个节点（触发后端即时握手测速并就地更新 DB 与界面）
     const pingSingleNode = async (node) => {
       if (testingNodeIds.value.has(node.id)) return;
       testingNodeIds.value.add(node.id);
@@ -106,7 +115,7 @@ export default {
       }
     };
 
-    // 批量并发测速（支持测试当前展示的节点）
+    // 批量并发测速（支持测试当前展示/筛选的节点）
     const pingCurrentFilteredNodes = async () => {
       if (isBatchTesting.value) return;
       const targetList = filteredNodes.value;
@@ -145,10 +154,10 @@ export default {
       for (const proxyName of grp.proxies) {
         const matched = props.nodes.find(n => n.display_name === proxyName);
         if (matched) {
-          const item = nodeLatencies.value[matched.id] || nodeLatencies.value[String(matched.id)];
-          if (item && item.latency !== null && item.latency !== undefined) {
-            if (minLat === null || item.latency < minLat) {
-              minLat = item.latency;
+          const lat = getNodeLatency(matched.id);
+          if (lat !== null && lat !== undefined) {
+            if (minLat === null || lat < minLat) {
+              minLat = lat;
             }
           }
         }
@@ -268,7 +277,7 @@ export default {
                 ⚡ {{ dynamicGroups.length }} 动态组 · 🌐 {{ nodes.length }} 节点
               </span>
             </div>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">聚合动态策略组自动测速容灾 + 物理透传平铺，支持单节点与批量实时测速</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">后端每 5 分钟定时自动巡检测速，支持前端单节点点测与批量实时测速</p>
           </div>
         </div>
 

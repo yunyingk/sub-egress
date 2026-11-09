@@ -16,7 +16,7 @@ from .builder import build_base64_config, build_clash_config, build_singbox_conf
 from .db import get_db
 from .models import Node, Setting, Source
 from .parsers.clash import extract_subscription_extra_info
-from .syncer import sync_single_source
+from .syncer import ping_single_node, sync_single_source
 
 router = APIRouter()
 
@@ -331,7 +331,10 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
             "port": n.port,
             "country_code": n.country_code,
             "country_flag": n.country_flag,
-            "is_residential": n.is_residential
+            "is_residential": n.is_residential,
+            "latency": n.latency,
+            "latency_status": n.latency_status,
+            "latency_updated_at": n.latency_updated_at.isoformat() if n.latency_updated_at else None
         }
         nodes.append(node_dict)
         raw_nodes_for_dyn.append(node_dict)
@@ -346,27 +349,6 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
 
 # ==================== 节点延迟测速 API ====================
 
-async def ping_single_node(host: str, port: int, node_type: str, timeout: float = 2.5) -> Dict[str, Any]:
-    t0 = time.perf_counter()
-    try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
-        rtt = (time.perf_counter() - t0) * 1000.0
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
-        return {"latency": round(rtt, 1), "status": "ok", "error": None}
-    except ConnectionRefusedError:
-        rtt = (time.perf_counter() - t0) * 1000.0
-        if node_type == "hysteria2":
-            return {"latency": round(rtt, 1), "status": "ok", "error": None}
-        return {"latency": round(rtt, 1), "status": "refused", "error": "Connection refused"}
-    except asyncio.TimeoutError:
-        return {"latency": None, "status": "timeout", "error": "Connection timed out"}
-    except Exception as e:
-        return {"latency": None, "status": "error", "error": str(e)}
-
 class BatchPingPayload(BaseModel):
     node_ids: Optional[List[int]] = None
 
@@ -379,6 +361,11 @@ async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Node not found")
     
     result = await ping_single_node(node.server, node.port, node.node_type)
+    node.latency = result["latency"]
+    node.latency_status = result["status"]
+    node.latency_updated_at = datetime.utcnow()
+    await db.commit()
+
     return {
         "node_id": node.id,
         "display_name": node.display_name,
@@ -389,21 +376,25 @@ async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/api/nodes/ping", summary="批量并发测试节点延迟")
 async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: AsyncSession = Depends(get_db)):
-    stmt = select(Node.id, Node.server, Node.port, Node.node_type)
+    stmt = select(Node)
     if payload and payload.node_ids:
         stmt = stmt.where(Node.id.in_(payload.node_ids))
     res = await db.execute(stmt)
-    nodes = res.fetchall()
+    nodes = res.scalars().all()
 
     sem = asyncio.Semaphore(20)
 
-    async def worker(nid: int, host: str, port: int, ntype: str):
+    async def worker(node: Node):
         async with sem:
-            res = await ping_single_node(host, port, ntype, timeout=2.5)
-            return nid, res
+            res = await ping_single_node(node.server, node.port, node.node_type, timeout=2.5)
+            node.latency = res["latency"]
+            node.latency_status = res["status"]
+            node.latency_updated_at = datetime.utcnow()
+            return node.id, res
 
-    tasks = [worker(n[0], n[1], n[2], n[3]) for n in nodes]
+    tasks = [worker(n) for n in nodes]
     results = await asyncio.gather(*tasks)
+    await db.commit()
 
     return {
         "total": len(results),
