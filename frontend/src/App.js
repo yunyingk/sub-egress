@@ -72,6 +72,15 @@ export default {
           if (currentUser.value.clash_terminal_port) {
             settings.value.clash_terminal_port = currentUser.value.clash_terminal_port;
           }
+          if (currentUser.value.custom_direct_domains !== undefined) {
+            settings.value.custom_direct_domains = currentUser.value.custom_direct_domains;
+          }
+          if (currentUser.value.custom_proxy_domains !== undefined) {
+            settings.value.custom_proxy_domains = currentUser.value.custom_proxy_domains;
+          }
+          if (currentUser.value.custom_rules !== undefined) {
+            settings.value.custom_rules = currentUser.value.custom_rules;
+          }
         } else if (res.status === 401) {
           // 未登录，自动重定向到独立登录页
           window.location.href = '/login.html';

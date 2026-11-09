@@ -17,6 +17,9 @@ class User(Base):
     subscription_title = Column(String(128), default="sub-egress", nullable=False)
     clash_mixed_port = Column(String(16), default="7897", nullable=False)
     clash_terminal_port = Column(String(16), default="7898", nullable=False)
+    custom_direct_domains = Column(Text, default="ying-qing.cn", nullable=True)
+    custom_proxy_domains = Column(Text, default="", nullable=True)
+    custom_rules = Column(Text, default="", nullable=True)
     oauth_provider = Column(String(32), nullable=True)  # authentik / etc.
     oauth_id = Column(String(128), nullable=True)
     last_login_at = Column(DateTime, nullable=True)

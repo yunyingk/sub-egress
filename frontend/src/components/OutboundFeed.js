@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 
 export default {
   name: 'OutboundFeed',
@@ -9,6 +9,8 @@ export default {
   emits: ['update:selectedTarget', 'openSettings'],
   setup(props, { emit }) {
     const copied = ref(false);
+    const showQr = ref(false);
+    let hoverTimeout = null;
     const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
 
     const onNameChange = () => {
@@ -45,6 +47,53 @@ export default {
       return 'YAML (Mihomo)';
     });
 
+    const clashSchemeUrl = computed(() => {
+      return `clash://install-config?url=${encodeURIComponent(activeSubscriptionUrl.value)}&name=${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
+    });
+
+    const singboxSchemeUrl = computed(() => {
+      return `sing-box://import-remote-profile?url=${encodeURIComponent(activeSubscriptionUrl.value)}#${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
+    });
+
+    const renderQrCode = () => {
+      nextTick(() => {
+        const container = document.getElementById('qrcode-container-box');
+        if (!container) return;
+        container.innerHTML = '';
+        if (window.QRCode) {
+          new window.QRCode(container, {
+            text: activeSubscriptionUrl.value,
+            width: 170,
+            height: 170,
+            colorDark: "#0f172a",
+            colorLight: "#ffffff",
+            correctLevel: window.QRCode.CorrectLevel.M
+          });
+        }
+      });
+    };
+
+    const toggleQr = () => {
+      showQr.value = !showQr.value;
+      if (showQr.value) renderQrCode();
+    };
+
+    const onMouseEnterQr = () => {
+      clearTimeout(hoverTimeout);
+      showQr.value = true;
+      renderQrCode();
+    };
+
+    const onMouseLeaveQr = () => {
+      hoverTimeout = setTimeout(() => {
+        showQr.value = false;
+      }, 300);
+    };
+
+    watch(activeSubscriptionUrl, () => {
+      if (showQr.value) renderQrCode();
+    });
+
     const copySubscriptionUrl = () => {
       navigator.clipboard.writeText(activeSubscriptionUrl.value);
       copied.value = true;
@@ -57,11 +106,17 @@ export default {
 
     return {
       copied,
+      showQr,
       customName,
       onNameChange,
       defaultPlaceholder,
       activeSubscriptionUrl,
       formatExt,
+      clashSchemeUrl,
+      singboxSchemeUrl,
+      toggleQr,
+      onMouseEnterQr,
+      onMouseLeaveQr,
       copySubscriptionUrl,
       setTarget
     };
@@ -141,16 +196,61 @@ export default {
             <span class="overflow-x-auto py-1">{{ activeSubscriptionUrl }}</span>
           </div>
 
-          <!-- 操作按钮组 -->
-          <div class="grid grid-cols-2 gap-2 pt-1">
-            <button @click="copySubscriptionUrl" class="px-4 py-2 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white transition flex items-center justify-center gap-2 shadow-xs shadow-sky-600/20">
+          <!-- 操作按钮组 (复制链接 / 悬浮扫码二维码 / 新标签页预览) -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 relative">
+            <!-- 1. 复制链接 -->
+            <button @click="copySubscriptionUrl" class="px-3 py-2 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white transition flex items-center justify-center gap-1.5 shadow-xs shadow-sky-600/20">
               <i class="fa-solid" :class="copied ? 'fa-check text-emerald-300' : 'fa-copy'"></i>
               <span>{{ copied ? '已成功复制!' : '复制订阅链接' }}</span>
             </button>
 
-            <a :href="activeSubscriptionUrl" target="_blank" class="px-4 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition flex items-center justify-center gap-2 shadow-xs">
+            <!-- 2. 二维码扫码 (带悬浮/点击展示) -->
+            <div class="relative" @mouseenter="onMouseEnterQr" @mouseleave="onMouseLeaveQr">
+              <button @click="toggleQr" 
+                      :class="showQr ? 'bg-sky-50 dark:bg-sky-950/60 border-sky-400 text-sky-600 dark:text-sky-300' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'"
+                      class="w-full px-3 py-2 text-xs font-semibold rounded-lg border transition flex items-center justify-center gap-1.5 shadow-xs">
+                <i class="fa-solid fa-qrcode text-sky-500 text-sm"></i>
+                <span>二维码扫码</span>
+              </button>
+
+              <!-- 二维码浮层卡片 -->
+              <div v-show="showQr" 
+                   class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-30 transition-all">
+                <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-100 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <span class="flex items-center gap-1.5">
+                    <i class="fa-solid fa-mobile-screen text-sky-500"></i>
+                    移动设备扫码导入
+                  </span>
+                  <button @click.stop="showQr = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <!-- 二维码容器 (白色衬底保证高对比度扫码) -->
+                <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-inner flex items-center justify-center mx-auto w-[196px] h-[196px]">
+                  <div id="qrcode-container-box" class="flex items-center justify-center"></div>
+                </div>
+
+                <div class="mt-3 text-center space-y-1.5">
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                    手机相机扫码即可导入客户端
+                  </p>
+                  <div class="pt-1 flex items-center justify-center gap-2">
+                    <a :href="clashSchemeUrl" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition">
+                      Clash 一键导入
+                    </a>
+                    <a :href="singboxSchemeUrl" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition">
+                      Sing-box 导入
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. 新标签页打开 -->
+            <a :href="activeSubscriptionUrl" target="_blank" class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition flex items-center justify-center gap-1.5 shadow-xs">
               <i class="fa-solid fa-arrow-up-right-from-square"></i>
-              <span>在新标签页预览</span>
+              <span>新标签页预览</span>
             </a>
           </div>
         </div>
@@ -162,7 +262,7 @@ export default {
             <span>安全令牌: <span class="font-mono font-bold">{{ settings.sub_hash_token ? settings.sub_hash_token.substring(0, 8) + '...' : '未启用' }}</span></span>
           </div>
           <button @click="$emit('openSettings')" class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
-            设置令牌 →
+            设置令牌与分流规则 →
           </button>
         </div>
 

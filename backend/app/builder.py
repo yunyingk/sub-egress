@@ -254,6 +254,8 @@ def build_clash_config(
     mixed_port: int = 7897,
     terminal_port: int = 7898,
     custom_direct_domains: List[str] = None,
+    custom_proxy_domains: List[str] = None,
+    custom_rules: List[str] = None,
     custom_nameserver_policy: Dict[str, Any] = None
 ) -> str:
     """
@@ -382,11 +384,26 @@ def build_clash_config(
 
     # 动态组装 Rules
     rules = []
+    # 1. 用户级/全局直连域名规则 (优先级最高，置顶免代理且免 fake-ip 劫持)
     if custom_direct_domains:
         for dom in custom_direct_domains:
             dom = dom.strip()
             if dom:
                 rules.append(f"DOMAIN-SUFFIX,{dom},DIRECT")
+
+    # 2. 用户级/全局强制走主代理域名规则
+    if custom_proxy_domains:
+        for dom in custom_proxy_domains:
+            dom = dom.strip()
+            if dom:
+                rules.append(f"DOMAIN-SUFFIX,{dom},{main_group_name}")
+
+    # 3. 用户级自定义分流规则注入
+    if custom_rules:
+        for r in custom_rules:
+            r = r.strip()
+            if r and not r.startswith("#"):
+                rules.append(r.replace("__MAIN_PROXY__", main_group_name))
 
     for r in DEFAULT_RULES:
         rules.append(r.replace("__MAIN_PROXY__", main_group_name))
@@ -412,7 +429,10 @@ def build_clash_config(
     return yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
 
 
-def build_singbox_config(raw_nodes: List[Dict[str, Any]]) -> str:
+def build_singbox_config(
+    raw_nodes: List[Dict[str, Any]],
+    custom_direct_domains: List[str] = None
+) -> str:
     """
     Builds a complete, modern Sing-box JSON configuration with single-selector control.
     """
@@ -567,6 +587,11 @@ def build_singbox_config(raw_nodes: List[Dict[str, Any]]) -> str:
             "rules": [
                 {"protocol": "dns", "outbound": "dns-out"},
                 {"geoip": "private", "outbound": "direct"},
+                *(
+                    [{"domain_suffix": [d.strip() for d in custom_direct_domains if d.strip()], "outbound": "direct"}]
+                    if custom_direct_domains and any(d.strip() for d in custom_direct_domains)
+                    else []
+                ),
                 {"geoip": "cn", "outbound": "direct"},
                 {"geosite": "cn", "outbound": "direct"}
             ],

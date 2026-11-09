@@ -199,7 +199,10 @@ async def auth_login(payload: LoginPayload, response: Response, db: AsyncSession
             "sub_hash_token": user.sub_hash_token,
             "subscription_title": user.subscription_title,
             "clash_mixed_port": user.clash_mixed_port,
-            "clash_terminal_port": user.clash_terminal_port
+            "clash_terminal_port": user.clash_terminal_port,
+            "custom_direct_domains": user.custom_direct_domains or "ying-qing.cn",
+            "custom_proxy_domains": user.custom_proxy_domains or "",
+            "custom_rules": user.custom_rules or ""
         }
     }
 
@@ -252,7 +255,10 @@ async def auth_register(payload: RegisterPayload, response: Response, db: AsyncS
             "sub_hash_token": new_user.sub_hash_token,
             "subscription_title": new_user.subscription_title,
             "clash_mixed_port": new_user.clash_mixed_port,
-            "clash_terminal_port": new_user.clash_terminal_port
+            "clash_terminal_port": new_user.clash_terminal_port,
+            "custom_direct_domains": new_user.custom_direct_domains or "ying-qing.cn",
+            "custom_proxy_domains": new_user.custom_proxy_domains or "",
+            "custom_rules": new_user.custom_rules or ""
         }
     }
 
@@ -273,6 +279,9 @@ async def auth_me(user: User = Depends(get_current_user), db: AsyncSession = Dep
         "subscription_title": user.subscription_title,
         "clash_mixed_port": user.clash_mixed_port,
         "clash_terminal_port": user.clash_terminal_port,
+        "custom_direct_domains": user.custom_direct_domains or "ying-qing.cn",
+        "custom_proxy_domains": user.custom_proxy_domains or "",
+        "custom_rules": user.custom_rules or "",
         "passkeys_count": len(passkeys),
         "oauth_provider": user.oauth_provider,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -505,6 +514,9 @@ class UserSettingsPayload(BaseModel):
     subscription_title: Optional[str] = None
     clash_mixed_port: Optional[str] = None
     clash_terminal_port: Optional[str] = None
+    custom_direct_domains: Optional[str] = None
+    custom_proxy_domains: Optional[str] = None
+    custom_rules: Optional[str] = None
 
 @router.post("/api/user/settings", summary="保存当前用户专属订阅偏好")
 async def update_user_settings(
@@ -518,8 +530,14 @@ async def update_user_settings(
         user.clash_mixed_port = str(payload.clash_mixed_port).strip()
     if payload.clash_terminal_port is not None:
         user.clash_terminal_port = str(payload.clash_terminal_port).strip()
+    if payload.custom_direct_domains is not None:
+        user.custom_direct_domains = payload.custom_direct_domains.strip()
+    if payload.custom_proxy_domains is not None:
+        user.custom_proxy_domains = payload.custom_proxy_domains.strip()
+    if payload.custom_rules is not None:
+        user.custom_rules = payload.custom_rules.strip()
     await db.commit()
-    return {"status": "ok", "message": "个人订阅配置已更新"}
+    return {"status": "ok", "message": "个人订阅配置与分流规则已更新"}
 
 
 @router.post("/api/user/regenerate-token", summary="用户重置自身专属订阅令牌")
@@ -810,6 +828,28 @@ async def export_subscription(
     mixed_port = matched_user.clash_mixed_port if matched_user else settings.get("clash_mixed_port", "7897")
     terminal_port = matched_user.clash_terminal_port if matched_user else settings.get("clash_terminal_port", "7898")
 
+    # 用户级 / 全局分流规则与直连域名 (最高优先级)
+    user_direct_raw = (
+        matched_user.custom_direct_domains
+        if (matched_user and matched_user.custom_direct_domains is not None)
+        else settings.get("custom_direct_domains", "ying-qing.cn")
+    )
+    direct_domains = [d.strip() for d in (user_direct_raw or "").replace("\n", ",").replace(";", ",").split(",") if d.strip()]
+
+    user_proxy_raw = (
+        matched_user.custom_proxy_domains
+        if (matched_user and matched_user.custom_proxy_domains is not None)
+        else settings.get("custom_proxy_domains", "")
+    )
+    proxy_domains = [d.strip() for d in (user_proxy_raw or "").replace("\n", ",").replace(";", ",").split(",") if d.strip()]
+
+    user_rules_raw = (
+        matched_user.custom_rules
+        if (matched_user and matched_user.custom_rules is not None)
+        else settings.get("custom_rules", "")
+    )
+    custom_rules_list = [r.strip() for r in (user_rules_raw or "").splitlines() if r.strip() and not r.strip().startswith("#")]
+
     # 构建对应内核配置
     if final_target == "clash":
         try:
@@ -824,11 +864,14 @@ async def export_subscription(
         content = build_clash_config(
             nodes_list,
             mixed_port=m_port,
-            terminal_port=t_port
+            terminal_port=t_port,
+            custom_direct_domains=direct_domains,
+            custom_proxy_domains=proxy_domains,
+            custom_rules=custom_rules_list
         )
         media_type = "text/yaml; charset=utf-8"
     elif final_target == "sing-box":
-        content = build_singbox_config(nodes_list)
+        content = build_singbox_config(nodes_list, custom_direct_domains=direct_domains)
         media_type = "application/json; charset=utf-8"
     else:
         content = build_base64_config(nodes_list)
@@ -860,15 +903,33 @@ class SettingsPayload(BaseModel):
     subscription_title: Optional[str] = None
     clash_mixed_port: Optional[str] = None
     clash_terminal_port: Optional[str] = None
+    custom_direct_domains: Optional[str] = None
+    custom_proxy_domains: Optional[str] = None
+    custom_rules: Optional[str] = None
 
 @router.get("/api/settings", summary="获取全局读写与安全设置")
 async def get_settings(user: Optional[User] = Depends(get_current_user_optional), db: AsyncSession = Depends(get_db)):
     settings = await get_system_settings(db)
-    # 若有当前用户，返回该用户专有端口与标题
+    # 若有当前用户，返回该用户专有端口、标题与分流规则
     sub_title = user.subscription_title if user else settings.get("subscription_title", "sub-egress")
     m_port = user.clash_mixed_port if user else settings.get("clash_mixed_port", "7897")
     t_port = user.clash_terminal_port if user else settings.get("clash_terminal_port", "7898")
     u_token = user.sub_hash_token if user else settings.get("sub_hash_token", "")
+    direct_domains = (
+        user.custom_direct_domains
+        if (user and user.custom_direct_domains is not None)
+        else settings.get("custom_direct_domains", "ying-qing.cn")
+    )
+    proxy_domains = (
+        user.custom_proxy_domains
+        if (user and user.custom_proxy_domains is not None)
+        else settings.get("custom_proxy_domains", "")
+    )
+    custom_rules = (
+        user.custom_rules
+        if (user and user.custom_rules is not None)
+        else settings.get("custom_rules", "")
+    )
 
     return {
         "version": VERSION,
@@ -879,7 +940,10 @@ async def get_settings(user: Optional[User] = Depends(get_current_user_optional)
         "write_api_token": settings.get("write_api_token", ""),
         "subscription_title": sub_title,
         "clash_mixed_port": m_port,
-        "clash_terminal_port": t_port
+        "clash_terminal_port": t_port,
+        "custom_direct_domains": direct_domains,
+        "custom_proxy_domains": proxy_domains,
+        "custom_rules": custom_rules
     }
 
 
@@ -914,6 +978,18 @@ async def update_settings(
         updates["clash_terminal_port"] = str(payload.clash_terminal_port).strip()
         if user:
             user.clash_terminal_port = str(payload.clash_terminal_port).strip()
+    if payload.custom_direct_domains is not None:
+        updates["custom_direct_domains"] = payload.custom_direct_domains.strip()
+        if user:
+            user.custom_direct_domains = payload.custom_direct_domains.strip()
+    if payload.custom_proxy_domains is not None:
+        updates["custom_proxy_domains"] = payload.custom_proxy_domains.strip()
+        if user:
+            user.custom_proxy_domains = payload.custom_proxy_domains.strip()
+    if payload.custom_rules is not None:
+        updates["custom_rules"] = payload.custom_rules.strip()
+        if user:
+            user.custom_rules = payload.custom_rules.strip()
 
     for k, v in updates.items():
         stmt = select(Setting).where(Setting.key == k)

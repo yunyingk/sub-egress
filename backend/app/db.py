@@ -41,6 +41,9 @@ async def init_db():
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS code VARCHAR(8);"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS user_id INTEGER;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_shared BOOLEAN DEFAULT TRUE;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_proxy_domains TEXT DEFAULT '';"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_rules TEXT DEFAULT '';"))
         else:
             # SQLite 增补字段检测
             try:
@@ -61,6 +64,15 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE sources ADD COLUMN user_id INTEGER;"))
                 if "is_shared" not in s_cols:
                     await conn.execute(text("ALTER TABLE sources ADD COLUMN is_shared BOOLEAN DEFAULT 1;"))
+
+                u_res = await conn.execute(text("PRAGMA table_info(users);"))
+                u_cols = [row[1] for row in u_res.fetchall()]
+                if "custom_direct_domains" not in u_cols:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
+                if "custom_proxy_domains" not in u_cols:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN custom_proxy_domains TEXT DEFAULT '';"))
+                if "custom_rules" not in u_cols:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN custom_rules TEXT DEFAULT '';"))
             except Exception:
                 pass
 
