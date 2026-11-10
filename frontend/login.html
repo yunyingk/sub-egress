@@ -162,7 +162,7 @@
           </button>
 
           <!-- 卡片 2: 第三方统一登录 (Authentik SSO) -->
-          <a href="/" 
+          <a href="/outpost.goauthentik.io/start?rd=/api/auth/sso/callback" 
              class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-blue-50/80 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-800 transition-all flex flex-col justify-between cursor-pointer">
             <div class="flex items-center gap-2.5 mb-2">
               <div class="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center text-base group-hover:scale-105 transition-transform">
@@ -346,6 +346,13 @@
         };
 
         onMounted(() => {
+          const params = new URLSearchParams(window.location.search);
+          const err = params.get('error');
+          if (err === 'sso_unauthorized' || err === 'sso_failed') {
+            errorMessage.value = '⚠️ 第三方单点登录授权未通过，请检查 Authentik 账号状态或使用账号密码登录';
+          } else if (err === 'account_disabled') {
+            errorMessage.value = '⚠️ 该第三方关联账号已被管理员禁用，请联系管理员处理';
+          }
           checkAuthStatus();
         });
 

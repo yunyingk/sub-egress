@@ -250,6 +250,66 @@ async def auth_logout(response: Response):
     return {"status": "ok", "message": "已成功退出登录"}
 
 
+@router.get("/api/auth/sso/callback", summary="Authentik 第三方 SSO 回调处理与会话发放")
+async def auth_sso_callback(
+    request: Request,
+    response: Response,
+    x_authentik_username: Optional[str] = Header(None),
+    x_authentik_email: Optional[str] = Header(None),
+    x_forwarded_user: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
+    if not sso_user:
+        # 若未携带 SSO 鉴权身份头，退回登录页
+        return RedirectResponse(url="/login?error=sso_unauthorized", status_code=302)
+
+    # 1. 优先按用户名或已绑定的 oauth_id 查找
+    stmt = select(User).where((User.username == sso_user) | (User.oauth_id == sso_user))
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+
+    # 2. 若未匹配到，且当前系统仅有唯一 admin 用户且未绑定 oauth：
+    # 自动关联 admin 账号（支持管理员初次通过 SSO 直接进入系统）
+    if not user:
+        count_stmt = select(func.count(User.id))
+        total_users = (await db.execute(count_stmt)).scalar() or 0
+        if total_users == 1:
+            admin_stmt = select(User).where(User.role == "admin")
+            admin_user = (await db.execute(admin_stmt)).scalar_one_or_none()
+            if admin_user and not admin_user.oauth_provider:
+                admin_user.oauth_provider = "authentik"
+                admin_user.oauth_id = sso_user
+                user = admin_user
+
+    # 3. 若仍无用户，为该 SSO 用户自动开通专属独立账号与订阅令牌
+    if not user:
+        token = secrets.token_hex(24)
+        user = User(
+            username=sso_user,
+            role="user",
+            is_active=True,
+            sub_hash_token=token,
+            subscription_title="sub-egress",
+            oauth_provider="authentik",
+            oauth_id=sso_user,
+            clash_mixed_port="7897",
+            clash_terminal_port="7898"
+        )
+        db.add(user)
+
+    if not user.is_active:
+        return RedirectResponse(url="/login?error=account_disabled", status_code=302)
+
+    user.last_login_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(user)
+
+    redirect_resp = RedirectResponse(url="/", status_code=302)
+    set_auth_cookie(redirect_resp, user)
+    return redirect_resp
+
+
 @router.post("/api/auth/change-password", summary="当前用户修改密码")
 async def auth_change_password(
     payload: ChangePasswordPayload,

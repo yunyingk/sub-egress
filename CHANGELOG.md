@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-11-10
+
+### Fixed
+- **Authentik SSO Redirect & Callback Gateway**: Fixed third-party login navigation from static `/` to the dedicated `/outpost.goauthentik.io/start?rd=/api/auth/sso/callback` initiation pipeline.
+- **SSO Callback & Session Issuance**: Added backend `/api/auth/sso/callback` handler extracting authenticated identity from Authentik, automatically mapping the administrator identity, issuing local sessions, and safely landing users onto the main dashboard without looping.
+
 ## [0.3.4] - 2026-11-10
 
 ### Added
