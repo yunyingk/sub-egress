@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-10
+
+### Added
+- **Account Appearance**: Save light, dark, or system appearance per user and synchronize it across devices.
+- **Source Ownership**: Distinguish the private owner or platform ownership from the user who created a source.
+
+### Changed
+- **Source API**: Replace source `user_id` with `owner_user_id` and `created_by_user_id`. Historical creators remain unknown when they cannot be established.
+- **Subscription Tokens**: Retire the legacy global token and prevent manually chosen user tokens. Existing administrator personal tokens remain valid. Anonymous shared subscriptions remain available when token enforcement is disabled.
+- **Shared Sources**: A shared source must be enabled globally and for the user to contribute nodes or usage; globally disabled sources are hidden from the user view.
+
+### Upgrade
+- Back up the database before upgrading. Startup migrates source ownership and removes the old global token setting. Private sources without a valid owner stop the migration for manual review. Rolling back to an older application requires restoring a compatible database schema and, if needed, the backup.
+
 ## [0.4.0] - 2026-11-10
 
 ### Changed
