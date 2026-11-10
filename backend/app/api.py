@@ -84,15 +84,40 @@ async def github_oauth_callback(request: Request, db: Annotated[AsyncSession, De
     state_data = verify_session_token(github_oauth_state or "", SECRET_KEY)
     if not state_data or not secrets.compare_digest(state_data.get("oauth_state", ""), state):
         raise HTTPException(status_code=400, detail="GitHub OAuth state 无效或已过期")
-    async with httpx.AsyncClient(timeout=10, headers={"Accept": "application/json", "User-Agent": "sub-egress"}) as client:
-        token_response = await client.post("https://github.com/login/oauth/access_token", data={"client_id": os.environ["GITHUB_CLIENT_ID"], "client_secret": os.environ["GITHUB_CLIENT_SECRET"], "code": code, "redirect_uri": os.environ["GITHUB_REDIRECT_URI"], "state": state})
-        token_response.raise_for_status()
-        access_token = token_response.json().get("access_token")
-        if not access_token:
-            raise HTTPException(status_code=401, detail="GitHub 未授予访问令牌")
-        profile_response = await client.get("https://api.github.com/user", headers={"Authorization": f"Bearer {access_token}"})
-        profile_response.raise_for_status()
-        profile = profile_response.json()
+
+    github_proxy = os.getenv("GITHUB_PROXY") or os.getenv("OUTBOUND_PROXY")
+    if not github_proxy and (os.path.exists("/frontend") or os.getenv("DATA_DIR") == "/data"):
+        github_proxy = "http://10.42.1.1:7897"
+
+    try:
+        async with httpx.AsyncClient(proxy=github_proxy, timeout=15.0, headers={"Accept": "application/json", "User-Agent": "sub-egress"}) as client:
+            token_response = await client.post(
+                "https://github.com/login/oauth/access_token",
+                data={
+                    "client_id": os.environ["GITHUB_CLIENT_ID"],
+                    "client_secret": os.environ["GITHUB_CLIENT_SECRET"],
+                    "code": code,
+                    "redirect_uri": os.environ["GITHUB_REDIRECT_URI"],
+                    "state": state
+                }
+            )
+            token_response.raise_for_status()
+            access_token = token_response.json().get("access_token")
+            if not access_token:
+                response = RedirectResponse("/login?error=github_token_rejected", status_code=302)
+                response.delete_cookie("github_oauth_state", path="/")
+                return response
+            profile_response = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            profile_response.raise_for_status()
+            profile = profile_response.json()
+    except Exception:
+        response = RedirectResponse("/login?error=github_network_error", status_code=302)
+        response.delete_cookie("github_oauth_state", path="/")
+        return response
+
     subject = str(profile["id"])
     identity_result = await db.execute(select(OAuthIdentity).where(OAuthIdentity.issuer == GITHUB_OAUTH_ISSUER, OAuthIdentity.subject == subject))
     identity = identity_result.scalar_one_or_none()

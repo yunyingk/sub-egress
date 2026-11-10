@@ -47,6 +47,8 @@ spec:
                   name: sub-egress-github-oauth
                   key: GITHUB_REDIRECT_URI
                   optional: true
+            - name: GITHUB_PROXY
+              value: "http://10.42.1.1:7897"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

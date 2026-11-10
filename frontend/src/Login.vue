@@ -436,6 +436,10 @@ export default {
         errorMessage.value = '⚠️ 第三方单点登录授权未通过，请检查 Authentik 账号状态或使用账号密码登录';
       } else if (err === 'account_disabled') {
         errorMessage.value = '⚠️ 该第三方关联账号已被管理员禁用，请联系管理员处理';
+      } else if (err === 'github_network_error') {
+        errorMessage.value = '⚠️ GitHub 认证服务通信超时或网络异常，已自动通过系统代理链路重试，请重新点击登录';
+      } else if (err === 'github_token_rejected') {
+        errorMessage.value = '⚠️ GitHub 授权已被取消或拒绝，请重试';
       }
       if (currentStep.value !== 'github_bind') {
         checkAuthStatus();

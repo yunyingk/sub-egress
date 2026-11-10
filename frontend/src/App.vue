@@ -1,10 +1,97 @@
 <template>
-    <template v-if="isAdminRoute">
-      <AdminRules v-if="isAdminRulesRoute && currentUser && currentUser.role === 'admin'" />
-      <AdminPanel v-else-if="currentUser && currentUser.role === 'admin'" :visible="true" :current-admin="currentUser" @close="navigateHome" />
-      <div v-else class="p-8 text-center">需要管理员权限</div>
-    </template>
-    <div v-else class="max-w-7xl mx-auto px-4 py-8">
+  <!-- 管理后台独立全屏大盘 (/admin?tab=users | /admin?tab=rules) -->
+  <div v-if="isAdminRoute" class="max-w-7xl mx-auto px-4 py-8">
+    <!-- 管理员未就绪或鉴权加载状态 -->
+    <div v-if="!currentUser" class="flex flex-col items-center justify-center min-h-[50vh] text-slate-400">
+      <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3 text-purple-500"></i>
+      <span class="text-sm font-medium">正在校验管理员权限...</span>
+    </div>
+
+    <!-- 非管理员权限拦截卡片 -->
+    <div v-else-if="currentUser.role !== 'admin'" class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 text-center max-w-md mx-auto mt-16 space-y-4">
+      <div class="w-14 h-14 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto text-2xl shadow-inner">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+      <h3 class="text-lg font-bold text-slate-900 dark:text-white">访问权限受限</h3>
+      <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+        当前登录账号 <strong class="text-slate-800 dark:text-slate-200">[{{ currentUser.username }}]</strong> 不具备管理员权限，无法访问系统管理控制台。
+      </p>
+      <div class="pt-2">
+        <button @click="navigateHome" class="w-full py-2.5 px-4 text-xs font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all cursor-pointer">
+          返回调度中枢首页
+        </button>
+      </div>
+    </div>
+
+    <!-- 管理员控制台主体大盘 -->
+    <div v-else class="space-y-6">
+      <!-- 统一风格顶部导航栏 -->
+      <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 border-b border-slate-200 dark:border-slate-800 gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-md shadow-purple-500/20 text-white text-lg">
+            <i class="fa-solid fa-users-gear"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">sub-egress 管理控制台</h1>
+              <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800 flex items-center gap-1">
+                <i class="fa-solid fa-shield-halved text-[10px]"></i> 管理员专属
+              </span>
+              <span v-if="appVersion" class="text-xs text-slate-400 font-mono">{{ appVersion }}</span>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400">多租户生命周期管控 · 全局订阅参数 · 权威分流规则中枢</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <ThemeToggle />
+
+          <!-- 返回前台调度中枢 -->
+          <button @click="navigateHome" 
+                  class="px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-xs transition-all flex items-center gap-2 cursor-pointer">
+            <i class="fa-solid fa-arrow-left text-sky-500"></i>
+            <span>返回调度中枢</span>
+          </button>
+
+          <!-- 管理员身份标签 -->
+          <div class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-xs font-bold text-purple-700 dark:text-purple-300">
+            <i class="fa-solid fa-user-shield"></i>
+            <span>{{ currentUser.username }}</span>
+          </div>
+
+          <!-- 退出登录 -->
+          <button @click="handleLogout" title="退出登录" 
+                  class="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all cursor-pointer">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- 二级 Tab 导航切换器: ?tab=users vs ?tab=rules -->
+      <div class="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 w-fit">
+        <button @click="switchAdminTab('users')" 
+                :class="adminTab === 'users' ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                class="px-4 py-2 text-xs sm:text-sm rounded-xl transition-all flex items-center gap-2 cursor-pointer">
+          <i class="fa-solid fa-users-gear text-sm"></i>
+          <span>用户与租户管理</span>
+        </button>
+        <button @click="switchAdminTab('rules')" 
+                :class="adminTab === 'rules' ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                class="px-4 py-2 text-xs sm:text-sm rounded-xl transition-all flex items-center gap-2 cursor-pointer">
+          <i class="fa-solid fa-sliders text-sm"></i>
+          <span>全局规则与设置</span>
+        </button>
+      </div>
+
+      <!-- Tab 1: 用户管理 -->
+      <AdminPanel v-if="adminTab === 'users'" :visible="true" :current-admin="currentUser" @close="navigateHome" />
+
+      <!-- Tab 2: 全局规则与设置 -->
+      <AdminRules v-else-if="adminTab === 'rules'" />
+    </div>
+  </div>
+
+  <div v-else class="max-w-7xl mx-auto px-4 py-8">
       <Navbar 
         :version="appVersion"
         :syncing="syncing"
@@ -80,6 +167,7 @@ import AddSourceModal from './components/AddSourceModal.vue';
 import UserSecurityModal from './components/UserSecurityModal.vue';
 import AdminPanel from './components/AdminPanel.vue';
 import AdminRules from './components/AdminRules.vue';
+import ThemeToggle from './components/ThemeToggle.vue';
 
 export default {
   name: 'App',
@@ -91,14 +179,40 @@ export default {
     SettingsModal,
     AddSourceModal,
     UserSecurityModal,
-    AdminPanel
-    ,AdminRules
+    AdminPanel,
+    AdminRules,
+    ThemeToggle
   },
   setup() {
     const currentUser = ref(null);
-    const isAdminRoute = window.location.pathname.startsWith('/admin/');
-    const isAdminRulesRoute = window.location.pathname === '/admin/rules';
-    const navigateAdmin = () => { window.location.href = '/admin/users'; };
+    const isAdminRoute = computed(() => {
+      const p = window.location.pathname;
+      return p === '/admin' || p.startsWith('/admin/');
+    });
+
+    const getInitialAdminTab = () => {
+      const p = window.location.pathname;
+      if (p === '/admin/rules') return 'rules';
+      if (p === '/admin/users') return 'users';
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') === 'rules' ? 'rules' : 'users';
+    };
+
+    const adminTab = ref(getInitialAdminTab());
+
+    const switchAdminTab = (tab) => {
+      adminTab.value = tab;
+      window.history.pushState(null, '', `/admin?tab=${tab}`);
+    };
+
+    const navigateAdmin = (tab = 'users') => {
+      if (isAdminRoute.value) {
+        switchAdminTab(tab);
+      } else {
+        window.location.href = `/admin?tab=${tab}`;
+      }
+    };
+
     const navigateHome = () => { window.location.href = '/'; };
     const sources = ref([]);
     const nodes = ref([]);
@@ -300,6 +414,9 @@ export default {
     };
 
     onMounted(async () => {
+      window.addEventListener('popstate', () => {
+        adminTab.value = getInitialAdminTab();
+      });
       await fetchCurrentUser();
       fetchSources();
       fetchNodes();
@@ -309,7 +426,8 @@ export default {
     return {
       currentUser,
       isAdminRoute,
-      isAdminRulesRoute,
+      adminTab,
+      switchAdminTab,
       navigateAdmin,
       navigateHome,
       sources,

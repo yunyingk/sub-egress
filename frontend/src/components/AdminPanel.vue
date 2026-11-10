@@ -1,28 +1,22 @@
 <template>
-    <div v-if="visible" class="max-w-7xl mx-auto px-4 py-8">
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full p-6 md:p-8 min-h-[70vh] flex flex-col">
-        <!-- 弹窗标题 -->
-        <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-700 shrink-0 mb-4">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-              <i class="fa-solid fa-users-gear text-lg"></i>
-            </div>
-            <div>
-              <h3 class="text-lg font-bold text-slate-900 dark:text-white">系统管理大盘 · 多租户用户管理</h3>
-              <p class="text-xs text-slate-500 dark:text-slate-400">管控多用户生命周期、专属订阅令牌、通行密钥与安全凭证</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <a href="/admin/users" class="px-3 py-1.5 text-xs rounded-lg border">用户管理</a>
-            <a href="/admin/rules" class="px-3 py-1.5 text-xs rounded-lg border">全局规则</a>
-            <button @click="fetchUsers" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1.5">
-              <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': loading}"></i>刷新
-            </button>
-            <button @click="$emit('close')" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
-              <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-          </div>
+  <div v-if="visible" class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full p-6 md:p-8 min-h-[70vh] flex flex-col space-y-4">
+    <!-- 标题栏与刷新 -->
+    <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+          <i class="fa-solid fa-users-gear text-lg"></i>
         </div>
+        <div>
+          <h3 class="text-lg font-bold text-slate-900 dark:text-white">系统管理大盘 · 多租户用户管理</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">管控多用户生命周期、专属订阅令牌、通行密钥与安全凭证</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button @click="fetchUsers" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': loading}"></i>刷新
+        </button>
+      </div>
+    </div>
 
         <!-- 提示栏 -->
         <div v-if="errorMessage" class="mb-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2 shrink-0">
@@ -62,11 +56,28 @@
           </div>
         </div>
 
-        <form class="flex flex-wrap gap-2" @submit.prevent="createUser">
-          <input v-model="newUsername" required minlength="5" maxlength="20" pattern="[a-z0-9_-]+" placeholder="新用户名（5–20位小写）" class="flex-1 min-w-48 rounded-lg border px-3 py-2 text-sm dark:bg-slate-900">
-          <input v-model="newUserPassword" minlength="20" maxlength="260" placeholder="初始密码（留空自动生成）" class="flex-1 min-w-48 rounded-lg border px-3 py-2 text-sm dark:bg-slate-900">
-          <button class="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm">创建用户</button>
-        </form>
+    <!-- 创建新租户用户 -->
+    <form class="flex flex-wrap items-center gap-2.5 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-750/50 border border-slate-200 dark:border-slate-700" @submit.prevent="createUser">
+      <div class="relative flex-1 min-w-[200px]">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+          <i class="fa-regular fa-user"></i>
+        </span>
+        <input v-model="newUsername" required minlength="5" maxlength="20" pattern="[a-z0-9_-]+" placeholder="新用户名（5–20位小写与数字）" 
+               class="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+      </div>
+      <div class="relative flex-1 min-w-[200px]">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+          <i class="fa-solid fa-lock"></i>
+        </span>
+        <input v-model="newUserPassword" minlength="20" maxlength="260" placeholder="初始密码（留空自动生成 32 位合规强密码）" 
+               class="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+      </div>
+      <button type="submit" :disabled="loading" 
+              class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50">
+        <i class="fa-solid fa-user-plus"></i>
+        <span>创建用户</span>
+      </button>
+    </form>
 
         <!-- 用户列表表格 (自适应滚动) -->
         <div class="flex-1 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl">
@@ -220,19 +231,16 @@
           </table>
         </div>
 
-        <!-- 底部信息 -->
-        <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs text-slate-400 shrink-0">
-          <span>共 {{ users.length }} 个注册用户</span>
-          <button @click="$emit('close')" class="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition-all">
-            关 闭
-          </button>
-        </div>
-      </div>
+    <!-- 底部信息 -->
+    <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs text-slate-400 shrink-0">
+      <span>共 {{ users.length }} 个注册系统用户</span>
+      <span class="text-[11px] text-slate-400">可在操作栏为指定用户重设密码、启用/禁用、或解绑外部身份</span>
+    </div>
 
-      <!-- 重设密码子弹窗 -->
-      <div v-if="showResetModal" class="fixed inset-0 z-60 overflow-y-auto flex items-center justify-center p-4">
-        <div class="fixed inset-0 bg-slate-900/70 backdrop-blur-xs" @click="showResetModal = false"></div>
-        <div class="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 max-w-md w-full p-6 z-20">
+    <!-- 重设密码子弹窗 -->
+    <div v-if="showResetModal" class="fixed inset-0 z-60 overflow-y-auto flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-slate-900/70 backdrop-blur-xs" @click="showResetModal = false"></div>
+      <div class="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 max-w-md w-full p-6 z-20">
           <h4 class="text-base font-bold text-slate-900 dark:text-white mb-2">
             重置用户 [{{ targetUser.username }}] 的密码
           </h4>

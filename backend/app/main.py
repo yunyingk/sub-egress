@@ -64,8 +64,10 @@ async def redirect_login_html():
 async def redirect_index_html():
     return RedirectResponse(url="/", status_code=301)
 
+@app.api_route("/admin", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/admin/", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/admin/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-async def serve_admin_app(path: str):
+async def serve_admin_app(path: str = ""):
     return FileResponse(str(frontend_dir / "index.html"))
 
 if frontend_dir.exists():
