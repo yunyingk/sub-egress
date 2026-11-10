@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-11-10
+
+### Fixed
+- **Subscription Export**: Restore Sing-box and Base64 node generation for the flattened node format used by the subscription API, while retaining support for nested node configurations.
+
 ## [0.5.0] - 2026-11-10
 
 ### Added

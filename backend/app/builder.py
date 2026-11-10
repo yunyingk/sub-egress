@@ -443,7 +443,8 @@ def build_singbox_config(
     pass_through_tags: list[str] = []
 
     for item in raw_nodes:
-        s = copy.deepcopy(item.get("config_json", {}))
+        config = item.get("config_json")
+        s = copy.deepcopy(config if isinstance(config, dict) else item)
         tag = item.get("display_name")
         ntype = s.get("type", "").lower()
 
@@ -620,7 +621,8 @@ def build_base64_config(raw_nodes: list[dict[str, Any]]) -> str:
     """
     uris: list[str] = []
     for item in raw_nodes:
-        s = item.get("config_json", {})
+        config = item.get("config_json")
+        s = config if isinstance(config, dict) else item
         tag = item.get("display_name", "")
         ntype = s.get("type", "").lower()
         tag_encoded = urllib.parse.quote(tag)
