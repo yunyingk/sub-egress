@@ -1167,7 +1167,8 @@ async def admin_list_sources(
                 "is_shared": s.is_shared,
                 "user_id": s.user_id,
                 "owner_username": uname or ("系统平台共享" if s.is_shared else "未知用户"),
-                "can_manage": True,
+                "can_edit": bool(s.is_shared),
+                "can_manage": bool(s.is_shared),
                 "expire_at": s.expire_at.isoformat() if s.expire_at else None,
                 "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
                 "reset_info": extra.get("reset_info"),
@@ -1236,6 +1237,16 @@ async def admin_update_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    # 隐私保护铁律：管理员无权编辑租户的私有订阅源（涉及租户个人隐私）。私有源绝不可转化为公共源；若违规仅支持删除或刷新。
+    if not src.is_shared:
+        raise HTTPException(
+            status_code=403,
+            detail="管理员无权编辑租户私有订阅源（保护租户数据隐私）。私有源绝不可转化为公共源；若违规仅支持删除或刷新。"
+        )
+
+    if payload.is_shared is not None and not payload.is_shared:
+        raise HTTPException(status_code=400, detail="平台共享源不可擅自变更为私有源")
+
     if payload.name is not None:
         src.name = payload.name.strip()
     if payload.url is not None:
@@ -1244,8 +1255,6 @@ async def admin_update_source(
         src.enabled = payload.enabled
     if payload.raw_content is not None:
         src.raw_content = payload.raw_content
-    if payload.is_shared is not None:
-        src.is_shared = payload.is_shared
 
     await db.commit()
     await sync_single_source(src.id, db)

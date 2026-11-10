@@ -7,6 +7,7 @@ from app.api import (
     admin_create_source,
     admin_delete_source,
     admin_list_sources,
+    admin_refresh_source,
     admin_update_source,
     create_source,
     delete_source,
@@ -202,7 +203,26 @@ async def test_admin_shared_sources_management(monkeypatch):
 
         # 管理员在审计模式下可以列出全量源（包含租户私有源）
         all_list = await admin_list_sources(admin=admin, db=db, scope="all")
-        assert any(s["name"] == "Alice住宅宽带" for s in all_list)
+        alice_entry = next(s for s in all_list if s["name"] == "Alice住宅宽带")
+        assert alice_entry["can_edit"] is False  # 私有源不可编辑！
+        shared_entry = next(s for s in all_list if s["id"] == shared_id)
+        assert shared_entry["can_edit"] is True  # 共享源可编辑
+
+        # 管理员尝试编辑租户私有源或强行转公，必须 403 阻断以保护租户数据隐私！
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_update_source(
+                source_id=20,
+                payload=SourceUpdate(name="Admin篡改Alice私有源"),
+                admin=admin,
+                db=db
+            )
+        assert exc_info.value.status_code == 403
+        assert "租户私有" in exc_info.value.detail
+
+        # 管理员对私有源仅拥有刷新与违规清理删除权限
+        await admin_refresh_source(source_id=20, admin=admin, db=db)
+        await admin_delete_source(source_id=20, admin=admin, db=db)
+        assert (await db.get(Source, 20)) is None
 
         alice_sources = await list_sources(user=alice, db=db)
         assert any(s["id"] == shared_id and s["is_shared"] is True for s in alice_sources)

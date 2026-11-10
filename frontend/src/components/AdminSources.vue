@@ -55,9 +55,10 @@
     <!-- 架构隔离安全提示卡片 -->
     <div class="p-4 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/50 text-xs text-purple-900 dark:text-purple-200 flex items-start gap-3">
       <i class="fa-solid fa-shield-halved text-purple-600 dark:text-purple-400 mt-0.5 text-sm shrink-0"></i>
-      <div class="leading-relaxed">
-        <strong>多租户隔离与共享分发设计原则：</strong>
-        在此添加的节点源被标记为 <code class="px-1 py-0.5 bg-purple-100 dark:bg-purple-900 rounded font-mono">is_shared = true</code>，将作为公共基础设施自动广播下发至全平台所有用户的订阅中。普通用户在前台首页添加的数据源严格归该用户私有，绝不在此共享。
+      <div class="leading-relaxed space-y-1">
+        <div><strong>租户数据隐私与共享管控准则：</strong></div>
+        <div>1. <strong>平台共享源</strong>：在此统一配置向全平台广播下发的基础设施源，由管理员全权增删改查；</div>
+        <div>2. <strong>租户私有源</strong>：用户前台录入的源属于<strong>租户个人资产与严格隐私</strong>，管理员<strong>无权编辑且绝不能将其转为公有</strong>；在审计模式下仅保留异常刷新与违规清理删除权限。</div>
       </div>
     </div>
 
@@ -111,14 +112,23 @@
                 <span>刷新</span>
               </button>
 
-              <button @click="openEditModal(src)" 
+              <!-- 仅平台公共共享源允许管理员编辑；租户私有源为用户隐私，严禁管理员编辑或转为公有 -->
+              <button v-if="src.is_shared" 
+                      @click="openEditModal(src)" 
                       class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1 cursor-pointer">
                 <i class="fa-solid fa-pen-to-square"></i>
                 <span>编辑</span>
               </button>
+              <div v-else 
+                   class="px-2 py-1 text-[11px] text-slate-400 dark:text-slate-500 rounded bg-slate-100 dark:bg-slate-700/60 flex items-center gap-1 cursor-help" 
+                   title="租户私有数据源：涉及租户个人隐私，管理员无权直接编辑或转化为共享源，仅支持运维刷新或违规删除。">
+                <i class="fa-solid fa-user-lock text-[10px]"></i>
+                <span>私有·不可编辑</span>
+              </div>
 
               <button @click="deleteSource(src)" 
-                      class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 transition-all flex items-center gap-1 cursor-pointer">
+                      class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 transition-all flex items-center gap-1 cursor-pointer"
+                      :title="src.is_shared ? '删除平台共享源' : '以管理员身份删除此违规/废弃的租户私有源'">
                 <i class="fa-solid fa-trash-can"></i>
                 <span>删除</span>
               </button>
@@ -190,15 +200,10 @@
             </div>
           </div>
 
-          <!-- 共享属性选择 -->
-          <div class="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/40">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input v-model="form.is_shared" type="checkbox" class="w-4 h-4 text-purple-600 rounded">
-              <span class="font-bold text-purple-900 dark:text-purple-200">向全平台所有用户共享下发 (is_shared = true)</span>
-            </label>
-            <p class="text-[11px] text-purple-700/80 dark:text-purple-300/80 mt-1">
-              勾选后，该源下的所有健康节点将自动并入所有用户的专属订阅大盘与出站动态策略组中。
-            </p>
+          <!-- 平台共享属性说明 (不再提供转公/转私选择，严格遵循共享专区职责) -->
+          <div class="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/40 text-[11px] text-purple-800 dark:text-purple-300 flex items-start gap-2">
+            <i class="fa-solid fa-globe text-purple-600 dark:text-purple-400 mt-0.5 shrink-0"></i>
+            <span>此数据源为<strong>全平台公共基础设施</strong>（is_shared = true），保存后将自动广播下发至所有合法租户的客户端订阅与出站大盘中。</span>
           </div>
         </div>
 
@@ -292,6 +297,10 @@ export default {
     };
 
     const openEditModal = (src) => {
+      if (!src.is_shared) {
+        setNotice('租户私有订阅源受隐私保护，管理员无权直接编辑或转化为共享源，仅支持刷新或违规删除。', true);
+        return;
+      }
       isEditing.value = true;
       editingId.value = src.id;
       form.value = {
@@ -299,7 +308,7 @@ export default {
         url: src.url,
         source_type: src.source_type || 'auto',
         enabled: src.enabled !== false,
-        is_shared: src.is_shared !== false
+        is_shared: true
       };
       showModal.value = true;
     };
@@ -349,11 +358,14 @@ export default {
     };
 
     const deleteSource = async (src) => {
-      if (!confirm(`确定要彻底删除平台共享源「${src.name}」吗？\n删除后全平台所有用户的对应节点池都将被移除。`)) return;
+      const confirmMsg = src.is_shared
+        ? `确定要彻底删除平台共享源「${src.name}」吗？\n删除后全平台所有用户的对应节点池都将被移除。`
+        : `确定以管理员身份移除租户 [${src.owner_username}] 的私有订阅源「${src.name}」吗？\n此操作将同时清理该源下所有已解析的物理节点。`;
+      if (!confirm(confirmMsg)) return;
       try {
         const res = await fetch(`/api/admin/sources/${src.id}`, { method: 'DELETE' });
         if (res.ok) {
-          setNotice(`已成功删除平台共享源「${src.name}」`);
+          setNotice(`已成功删除源「${src.name}」`);
           await fetchSources();
         } else {
           const data = await res.json().catch(() => ({}));
