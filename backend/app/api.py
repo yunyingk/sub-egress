@@ -10,7 +10,7 @@ import urllib.parse
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -209,58 +209,11 @@ async def auth_login(payload: LoginPayload, response: Response, db: AsyncSession
 
 @router.post("/api/auth/register", summary="新用户自主注册")
 async def auth_register(payload: RegisterPayload, response: Response, db: AsyncSession = Depends(get_db)):
-    u_str = payload.username.strip()
-    p_str = payload.password.strip()
-
-    # 校验用户名
-    u_valid, u_msg = validate_username(u_str)
-    if not u_valid:
-        raise HTTPException(status_code=400, detail=u_msg)
-
-    # 校验密码
-    p_valid, p_msg = validate_password(p_str)
-    if not p_valid:
-        raise HTTPException(status_code=400, detail=p_msg)
-
-    # 检查用户名是否已存在
-    stmt = select(User).where(User.username == u_str.lower())
-    res = await db.execute(stmt)
-    if res.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="该用户名已存在，请更换其他用户名")
-
-    # 创建新用户并生成独占订阅 Token
-    token = secrets.token_hex(24)
-    new_user = User(
-        username=u_str.lower(),
-        password_hash=hash_password(p_str),
-        role="user",
-        is_active=True,
-        sub_hash_token=token,
-        subscription_title="sub-egress",
-        clash_mixed_port="7897",
-        clash_terminal_port="7898"
+    # 彻底关闭新用户自主注册功能
+    raise HTTPException(
+        status_code=403,
+        detail="系统已关闭新用户自主注册功能，如需使用请联系系统管理员分配账号"
     )
-    db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
-
-    session_token = set_auth_cookie(response, new_user)
-    return {
-        "status": "ok",
-        "token": session_token,
-        "user": {
-            "id": new_user.id,
-            "username": new_user.username,
-            "role": new_user.role,
-            "sub_hash_token": new_user.sub_hash_token,
-            "subscription_title": new_user.subscription_title,
-            "clash_mixed_port": new_user.clash_mixed_port,
-            "clash_terminal_port": new_user.clash_terminal_port,
-            "custom_direct_domains": new_user.custom_direct_domains or "ying-qing.cn",
-            "custom_proxy_domains": new_user.custom_proxy_domains or "",
-            "custom_rules": new_user.custom_rules or ""
-        }
-    }
 
 
 @router.get("/api/auth/me", summary="获取当前登录用户信息")
@@ -275,6 +228,7 @@ async def auth_me(user: User = Depends(get_current_user), db: AsyncSession = Dep
         "username": user.username,
         "role": user.role,
         "is_active": user.is_active,
+        "has_password": bool(user.password_hash),
         "sub_hash_token": user.sub_hash_token,
         "subscription_title": user.subscription_title,
         "clash_mixed_port": user.clash_mixed_port,
@@ -284,6 +238,7 @@ async def auth_me(user: User = Depends(get_current_user), db: AsyncSession = Dep
         "custom_rules": user.custom_rules or "",
         "passkeys_count": len(passkeys),
         "oauth_provider": user.oauth_provider,
+        "oauth_id": user.oauth_id,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
     }
@@ -332,8 +287,18 @@ class PasskeyLoginFinishPayload(BaseModel):
 @router.post("/api/auth/passkey/register/start", summary="发起通行密钥注册挑战")
 async def passkey_register_start(
     request: Request,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
+    # 硬限制：每个账号最多只允许绑定 5 个通行密钥
+    count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
+    pk_count = (await db.execute(count_stmt)).scalar() or 0
+    if pk_count >= 5:
+        raise HTTPException(
+            status_code=400,
+            detail="每个账号最多只允许绑定 5 个通行密钥。请在安全中心解绑多余设备后再添加新密钥。"
+        )
+
     host = request.headers.get("host", "sub.ying-qing.cn").split(":")[0]
     challenge = generate_challenge(f"reg:{user.id}", ttl_seconds=300)
 
@@ -393,6 +358,12 @@ async def passkey_register_finish(
 
     # 消费 Challenge
     verify_and_consume_challenge(reg_key, stored)
+
+    # 硬限制：每个账号最多只允许绑定 5 个通行密钥
+    count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
+    pk_count = (await db.execute(count_stmt)).scalar() or 0
+    if pk_count >= 5:
+        raise HTTPException(status_code=400, detail="每个账号最多只允许绑定 5 个通行密钥，已达到上限")
 
     # 检查是否重复注册
     stmt = select(PasskeyCredential).where(PasskeyCredential.credential_id == cred_info["credential_id"])
@@ -586,6 +557,46 @@ async def delete_user_passkey(
     await db.delete(k)
     await db.commit()
     return {"status": "ok", "message": "通行密钥已解除绑定"}
+
+
+class BindOAuthPayload(BaseModel):
+    provider: Optional[str] = "authentik"
+    oauth_id: Optional[str] = None
+
+@router.post("/api/user/unbind-oauth", summary="当前用户解绑第三方身份源")
+async def user_unbind_oauth(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # 安全防自锁检查：若用户未设置本地密码且没有任何通行密钥，禁止解绑以防账号无法登录！
+    if not user.password_hash:
+        count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
+        pk_count = (await db.execute(count_stmt)).scalar() or 0
+        if pk_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="为了您的账户安全，解绑第三方登录前请先设置登录密码或至少绑定一个通行密钥，以防账号无法登录。"
+            )
+
+    user.oauth_provider = None
+    user.oauth_id = None
+    await db.commit()
+    return {"status": "ok", "message": "已成功解除第三方登录绑定"}
+
+
+@router.post("/api/user/bind-oauth", summary="当前用户绑定第三方身份源")
+async def user_bind_oauth(
+    payload: BindOAuthPayload,
+    user: User = Depends(get_current_user),
+    x_authentik_username: Optional[str] = Header(None),
+    x_forwarded_user: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    sso_user = (payload.oauth_id or x_authentik_username or x_forwarded_user or user.username).strip()
+    user.oauth_provider = payload.provider or "authentik"
+    user.oauth_id = sso_user
+    await db.commit()
+    return {"status": "ok", "message": f"已成功绑定第三方登录 ({user.oauth_provider}: {user.oauth_id})"}
 
 
 # ==================== 管理员管理面板 API (独立页签与专属权限) ====================

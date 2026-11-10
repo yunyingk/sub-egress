@@ -82,8 +82,8 @@ export default {
             settings.value.custom_rules = currentUser.value.custom_rules;
           }
         } else if (res.status === 401) {
-          // 未登录，自动重定向到独立登录页
-          window.location.href = '/login.html';
+          // 未登录，自动重定向到独立登录页 (无 html 后缀)
+          window.location.href = '/login';
         }
       } catch (e) {
         console.error('Failed to fetch user', e);
@@ -213,7 +213,7 @@ export default {
       try {
         await fetch('/api/auth/logout', { method: 'POST' });
       } catch (e) {}
-      window.location.href = '/login.html';
+      window.location.href = '/login';
     };
 
     onMounted(async () => {

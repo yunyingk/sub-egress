@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-11-10
+
+### Added
+- **Clean URL Routing**: Removed `.html` suffix across all routes and UI navigation. Direct access to `/login` serves authentication portal; legacy requests to `/login.html` and `/index.html` permanently 301-redirect to clean endpoints.
+- **Passkey Hard Quota (5 Max)**: Strict enforcement allowing a maximum of 5 Passkeys per user with detailed audits on credential name, creation timestamp, and last verification time.
+- **Self-Service Third-Party SSO Binding/Unbinding**: Users can bind or unbind Authentik SSO from their security center with anti-lockout prevention (prohibits unbinding if no password and no passkeys exist).
+
+### Changed
+- **Unified Single-Page Login**: Removed tabbed navigation (`账号密码` / `通行密钥` / `新用户注册`). Password authentication forms the primary card, with Passkey and Authentik SSO neatly displayed below as dedicated one-click option cards.
+- **Closed Public Registration**: Completely closed self-registration endpoints (`POST /api/auth/register` returns 403 Forbidden). Accounts are managed and provisioned exclusively via administrator dashboard.
+
 ## [0.2.2] - 2026-11-09
 
 ### Added
