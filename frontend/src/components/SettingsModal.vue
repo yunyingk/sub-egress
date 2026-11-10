@@ -1,55 +1,4 @@
-import { ref, watch } from 'vue';
-
-export default {
-  name: 'SettingsModal',
-  props: {
-    visible: { type: Boolean, default: false },
-    settings: { type: Object, required: true },
-    saving: { type: Boolean, default: false }
-  },
-  emits: ['close', 'save', 'regenerateToken'],
-  setup(props, { emit }) {
-    const activeTab = ref('rules'); // 默认展示用户最关心的分流规则配置
-    const editSettings = ref({});
-
-    watch(() => props.visible, (val) => {
-      if (val) {
-        const copy = JSON.parse(JSON.stringify(props.settings || {}));
-        if (!copy.clash_mixed_port) copy.clash_mixed_port = '7897';
-        if (!copy.clash_terminal_port) copy.clash_terminal_port = '7898';
-        if (copy.custom_direct_domains === undefined || copy.custom_direct_domains === null) {
-          copy.custom_direct_domains = 'ying-qing.cn';
-        }
-        if (copy.custom_proxy_domains === undefined) copy.custom_proxy_domains = '';
-        if (copy.custom_rules === undefined) copy.custom_rules = '';
-        editSettings.value = copy;
-      }
-    });
-
-    const handleGenerate = async () => {
-      try {
-        const res = await fetch('/api/settings/regenerate-token', { method: 'POST' });
-        const data = await res.json();
-        if (data.new_token) {
-          editSettings.value.sub_hash_token = data.new_token;
-        }
-      } catch (e) {
-        console.error('Failed to regenerate token', e);
-      }
-    };
-
-    const handleSave = () => {
-      emit('save', editSettings.value);
-    };
-
-    return {
-      activeTab,
-      editSettings,
-      handleGenerate,
-      handleSave
-    };
-  },
-  template: `
+<template>
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl max-w-xl w-full p-6 space-y-5 max-h-[92vh] flex flex-col">
         <!-- 弹窗标题 -->
@@ -82,7 +31,7 @@ export default {
             <i class="fa-solid fa-network-wired"></i>
             <span>双端口与订阅参数</span>
           </button>
-          <button @click="activeTab = 'security'" 
+          <button v-if="false" @click="activeTab = 'security'" 
                   :class="{'border-sky-500 text-sky-600 dark:text-sky-400 font-bold': activeTab === 'security', 'border-transparent text-slate-500': activeTab !== 'security'}"
                   class="pb-2.5 px-4 text-xs border-b-2 transition-all flex items-center gap-1.5">
             <i class="fa-solid fa-key"></i>
@@ -180,7 +129,7 @@ export default {
             </div>
 
             <!-- 默认导出内核 -->
-            <div>
+          <div v-if="false">
               <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">默认订阅内核类型 (Default Target)</label>
               <select v-model="editSettings.default_target" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
                 <option value="clash">Clash / Mihomo (YAML)</option>
@@ -190,7 +139,7 @@ export default {
             </div>
 
             <!-- 客户端更新周期 -->
-            <div>
+          <div v-if="false">
               <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">客户端更新间隔提示 (小时)</label>
               <input v-model="editSettings.update_interval" type="number" min="1" max="72"
                      class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
@@ -198,7 +147,7 @@ export default {
           </div>
 
           <!-- TAB 3: 安全令牌与权限 -->
-          <div v-else-if="activeTab === 'security'" class="space-y-4">
+          <div v-else-if="activeTab === 'security'" class="space-y-4" v-if="false">
             <!-- 订阅哈希安全令牌 -->
             <div>
               <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -248,5 +197,60 @@ export default {
         </div>
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import { ref, watch } from 'vue';
+
+export default {
+  name: 'SettingsModal',
+  props: {
+    visible: { type: Boolean, default: false },
+    settings: { type: Object, required: true },
+    saving: { type: Boolean, default: false }
+  },
+  emits: ['close', 'save', 'regenerateToken'],
+  setup(props, { emit }) {
+    const activeTab = ref('rules'); // 默认展示用户最关心的分流规则配置
+    const editSettings = ref({});
+
+    watch(() => props.visible, (val) => {
+      if (val) {
+        const copy = JSON.parse(JSON.stringify(props.settings || {}));
+        if (!copy.clash_mixed_port) copy.clash_mixed_port = '7897';
+        if (!copy.clash_terminal_port) copy.clash_terminal_port = '7898';
+        if (copy.custom_direct_domains === undefined || copy.custom_direct_domains === null) {
+          copy.custom_direct_domains = 'ying-qing.cn';
+        }
+        if (copy.custom_proxy_domains === undefined) copy.custom_proxy_domains = '';
+        if (copy.custom_rules === undefined) copy.custom_rules = '';
+        editSettings.value = copy;
+      }
+    });
+
+    const handleGenerate = async () => {
+      try {
+        const res = await fetch('/api/user/regenerate-token', { method: 'POST' });
+        const data = await res.json();
+        if (data.new_token) {
+          editSettings.value.sub_hash_token = data.new_token;
+        }
+      } catch (e) {
+        console.error('Failed to regenerate token', e);
+      }
+    };
+
+    const handleSave = () => {
+      emit('save', editSettings.value);
+    };
+
+    return {
+      activeTab,
+      editSettings,
+      handleGenerate,
+      handleSave
+    };
+  }
 };
+</script>

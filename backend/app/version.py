@@ -2,30 +2,20 @@
 sub-egress version declaration.
 Reads version dynamically from pyproject.toml as the Single Source of Truth (SSOT).
 """
-import sys
+import tomllib
+from importlib.metadata import version
 from pathlib import Path
 
+
 def _load_version() -> str:
-    fallback = "0.2.15"
-    try:
-        # Search parent directories for pyproject.toml
-        cur = Path(__file__).resolve().parent
-        for _ in range(4):
-            candidate = cur / "pyproject.toml"
-            if candidate.exists():
-                if sys.version_info >= (3, 11):
-                    import tomllib
-                    with open(candidate, "rb") as f:
-                        data = tomllib.load(f)
-                    return data.get("project", {}).get("version", fallback)
-                else:
-                    import re
-                    match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', candidate.read_text(encoding="utf-8"))
-                    if match:
-                        return match.group(1)
-            cur = cur.parent
-    except Exception:
-        pass
-    return fallback
+    # Search parent directories for pyproject.toml
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "pyproject.toml"
+        if candidate.is_file():
+            with candidate.open("rb") as project_file:
+                project = tomllib.load(project_file).get("project", {})
+            if project.get("name") == "sub-egress":
+                return project["version"]
+    return version("sub-egress")
 
 VERSION = _load_version()

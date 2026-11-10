@@ -10,11 +10,11 @@ import re
 import secrets
 import string
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 # ==================== 账号密码格式校验规范 ====================
 
-def validate_username(username: str) -> Tuple[bool, str]:
+def validate_username(username: str) -> tuple[bool, str]:
     """
     用户名规则校验：
     - 长度：5 ~ 20 字符
@@ -32,12 +32,12 @@ def validate_username(username: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def validate_password(password: str) -> Tuple[bool, str]:
+def validate_password(password: str) -> tuple[bool, str]:
     """
     密码规则校验：
     - 长度：20 ~ 260 字符
     - 严禁包含大写字母
-    - 必须包含小写字母和数字，可包含键盘符号
+    - 可使用小写字母、数字和符号；不强制字符种类组合
     """
     if not password:
         return False, "密码不能为空"
@@ -45,10 +45,6 @@ def validate_password(password: str) -> Tuple[bool, str]:
         return False, "密码长度必须在 20 到 260 个字符之间"
     if any(c.isupper() for c in password):
         return False, "密码严禁包含大写字母，请使用小写字母、数字和符号"
-    if not any(c.islower() for c in password):
-        return False, "密码必须至少包含一个小写英文字母"
-    if not any(c.isdigit() for c in password):
-        return False, "密码必须至少包含一个数字"
     return True, ""
 
 
@@ -117,7 +113,7 @@ def _b64decode_url(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + padding)
 
 
-def create_session_token(payload: Dict[str, Any], secret_key: str, expires_in_seconds: int = 86400 * 30) -> str:
+def create_session_token(payload: dict[str, Any], secret_key: str, expires_in_seconds: int = 86400 * 30) -> str:
     """
     创建带 HMAC-SHA256 签名的无依赖 Session Token。
     格式: <payload_b64>.<signature_b64>
@@ -133,7 +129,7 @@ def create_session_token(payload: Dict[str, Any], secret_key: str, expires_in_se
     return f"{payload_b64}.{sig_b64}"
 
 
-def verify_session_token(token: str, secret_key: str) -> Optional[Dict[str, Any]]:
+def verify_session_token(token: str, secret_key: str) -> dict[str, Any] | None:
     """
     验证 Session Token 签名并检查过期时间。
     """

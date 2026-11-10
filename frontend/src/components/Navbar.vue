@@ -1,17 +1,4 @@
-import ThemeToggle from './ThemeToggle.js';
-
-export default {
-  name: 'Navbar',
-  components: {
-    ThemeToggle
-  },
-  props: {
-    syncing: { type: Boolean, default: false },
-    version: { type: String, default: '' },
-    currentUser: { type: Object, default: () => null }
-  },
-  emits: ['openSettings', 'openSecurity', 'openAdmin', 'refreshAll', 'logout'],
-  template: `
+<template>
     <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 mb-8 border-b border-slate-200 dark:border-slate-800 gap-4">
       <div>
         <div class="flex items-center gap-3">
@@ -85,5 +72,22 @@ export default {
         </div>
       </div>
     </header>
-  `
+  
+</template>
+
+<script>
+import ThemeToggle from './ThemeToggle.vue';
+
+export default {
+  name: 'Navbar',
+  components: {
+    ThemeToggle
+  },
+  props: {
+    syncing: { type: Boolean, default: false },
+    version: { type: String, default: '' },
+    currentUser: { type: Object, default: () => null }
+  },
+  emits: ['openSettings', 'openSecurity', 'openAdmin', 'refreshAll', 'logout']
 };
+</script>

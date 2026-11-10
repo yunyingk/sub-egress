@@ -3,21 +3,20 @@ try:
 except ImportError:
     pytest = None
 
-from app.security import (
-    validate_username,
-    validate_password,
-    generate_secure_password,
-    hash_password,
-    verify_password,
-    create_session_token,
-    verify_session_token
-)
 from app.auth_webauthn import (
     generate_challenge,
     verify_and_consume_challenge,
-    decode_b64url,
-    encode_b64url
 )
+from app.security import (
+    create_session_token,
+    generate_secure_password,
+    hash_password,
+    validate_password,
+    validate_username,
+    verify_password,
+    verify_session_token,
+)
+
 
 def test_validate_username():
     # 正常小写字母与数字
@@ -48,10 +47,11 @@ def test_validate_username():
 
 
 def test_validate_password():
-    # 正常合规密码：20位以上，全小写+数字+符号
+    # 20 位以上且不含大写字母即可；字符类型无需强制组合。
     valid_pwd = "my-super-secret-password-12345"
     ok, msg = validate_password(valid_pwd)
     assert ok, msg
+    assert validate_password("!@#$%^&*()_+-=[]{};:,.<>?/")[0]
 
     # 严禁大写字母
     bad_pwd_upper = "My-super-secret-password-12345"
@@ -65,11 +65,10 @@ def test_validate_password():
     assert not ok
     assert "20 到 260" in msg
 
-    # 无数字
+    # 无数字仍然合法，只要符合长度且不含大写字母。
     bad_no_digit = "this-password-has-no-digits-at-all"
     ok, msg = validate_password(bad_no_digit)
-    assert not ok
-    assert "数字" in msg
+    assert ok, msg
 
 
 def test_generate_secure_password():

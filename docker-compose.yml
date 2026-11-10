@@ -10,6 +10,11 @@ services:
       - "${PORT:-8000}:8000"
     environment:
       - DATA_DIR=/data
+      - WEBAUTHN_ORIGIN=${WEBAUTHN_ORIGIN:-}
+      - SECRET_KEY=${SECRET_KEY:?Set a private random SECRET_KEY}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-}
       # Uncomment DATABASE_URL to connect to external PostgreSQL or bundled postgres service:
       # - DATABASE_URL=postgresql+asyncpg://dev:password@postgres:5432/sub_egress
     volumes:

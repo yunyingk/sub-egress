@@ -1,16 +1,4 @@
-import SourceCard from './SourceCard.js';
-
-export default {
-  name: 'SourceList',
-  components: {
-    SourceCard
-  },
-  props: {
-    sources: { type: Array, required: true },
-    refreshingIds: { type: Array, default: () => [] }
-  },
-  emits: ['openAddModal', 'refreshSource', 'deleteSource'],
-  template: `
+<template>
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -39,5 +27,21 @@ export default {
         />
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import SourceCard from './SourceCard.vue';
+
+export default {
+  name: 'SourceList',
+  components: {
+    SourceCard
+  },
+  props: {
+    sources: { type: Array, required: true },
+    refreshingIds: { type: Array, default: () => [] }
+  },
+  emits: ['openAddModal', 'refreshSource', 'deleteSource']
 };
+</script>

@@ -1,8 +1,45 @@
-from datetime import datetime
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from datetime import UTC, datetime
+
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.types import TypeDecorator
 
 Base = declarative_base()
+
+
+class UTCDateTime(TypeDecorator):
+    """Store instants as UTC and restore timezone information on SQLite."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            if value.utcoffset() is None:
+                raise ValueError("Datetime values must include a timezone")
+            return value.astimezone(UTC)
+        return None
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.utcoffset() is None else value.astimezone(UTC)
+
+
+def utc_now():
+    return datetime.now(UTC)
 
 class User(Base):
     __tablename__ = "users"
@@ -21,9 +58,9 @@ class User(Base):
     custom_rules = Column(Text, default="", nullable=True)
     oauth_provider = Column(String(32), nullable=True)  # authentik / etc.
     oauth_id = Column(String(128), nullable=True)
-    last_login_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login_at = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=utc_now)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     passkeys = relationship("PasskeyCredential", back_populates="user", cascade="all, delete-orphan")
     sources = relationship("Source", back_populates="user")
@@ -40,10 +77,24 @@ class PasskeyCredential(Base):
     name = Column(String(64), default="我的通行密钥", nullable=False)
     transports = Column(String(128), default="internal", nullable=True)
     aaguid = Column(String(64), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=utc_now)
+    last_used_at = Column(UTCDateTime, nullable=True)
 
     user = relationship("User", back_populates="passkeys")
+
+
+class OAuthIdentity(Base):
+    """A verified external identity; one local account may link many providers."""
+    __tablename__ = "oauth_identities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(64), nullable=False)
+    issuer = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_oauth_identity_issuer_subject"),)
+    user = relationship("User")
 
 
 class Source(Base):
@@ -62,11 +113,11 @@ class Source(Base):
     node_count = Column(Integer, default=0)
     traffic_used = Column(BigInteger, default=0)
     traffic_total = Column(BigInteger, default=0)
-    expire_at = Column(DateTime, nullable=True)
-    last_sync_at = Column(DateTime, nullable=True)
+    expire_at = Column(UTCDateTime, nullable=True)
+    last_sync_at = Column(UTCDateTime, nullable=True)
     raw_content = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(UTCDateTime, default=utc_now)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     nodes = relationship("Node", back_populates="source", cascade="all, delete-orphan")
     user = relationship("User", back_populates="sources")
@@ -87,9 +138,9 @@ class Node(Base):
     is_residential = Column(Boolean, default=False, index=True)
     latency = Column(Float, nullable=True)
     latency_status = Column(String(32), nullable=True)
-    latency_updated_at = Column(DateTime, nullable=True)
+    latency_updated_at = Column(UTCDateTime, nullable=True)
     config_json = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(UTCDateTime, default=utc_now)
 
     source = relationship("Source", back_populates="nodes")
 
@@ -100,4 +151,4 @@ class Setting(Base):
     key = Column(String(64), primary_key=True)
     value = Column(Text, nullable=False)
     description = Column(String(255), nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)

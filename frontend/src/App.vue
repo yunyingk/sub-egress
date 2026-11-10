@@ -1,12 +1,85 @@
+<template>
+    <template v-if="isAdminRoute">
+      <AdminRules v-if="isAdminRulesRoute && currentUser && currentUser.role === 'admin'" />
+      <AdminPanel v-else-if="currentUser && currentUser.role === 'admin'" :visible="true" :current-admin="currentUser" @close="navigateHome" />
+      <div v-else class="p-8 text-center">需要管理员权限</div>
+    </template>
+    <div v-else class="max-w-7xl mx-auto px-4 py-8">
+      <Navbar 
+        :version="appVersion"
+        :syncing="syncing"
+        :current-user="currentUser"
+        @open-settings="showSettingsModal = true" 
+        @open-security="showSecurityModal = true"
+        @open-admin="navigateAdmin"
+        @refresh-all="refreshAll" 
+        @logout="handleLogout"
+      />
+
+      <!-- 主工作区：上游数据源与下游分发中心 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-10">
+        <div class="lg:col-span-6">
+          <SourceList 
+            :sources="sources" 
+            :refreshing-ids="refreshingIds"
+            @open-add-modal="showAddModal = true"
+            @refresh-source="refreshSource"
+            @delete-source="deleteSource"
+          />
+        </div>
+
+        <div class="lg:col-span-6">
+          <OutboundFeed 
+            :settings="settings"
+            v-model:selected-target="selectedTarget"
+            @open-settings="showSettingsModal = true"
+          />
+        </div>
+      </div>
+
+      <!-- 底部：合并节点池大盘 (聚合动态策略组 + 物理透传平铺，支持折叠) -->
+      <NodePool :nodes="nodes" :dynamic-groups="dynamicGroups" />
+
+      <!-- 设置与添加源模态弹窗 -->
+      <SettingsModal 
+        :visible="showSettingsModal"
+        :settings="settings"
+        :saving="savingSettings"
+        @close="showSettingsModal = false"
+        @save="saveSettings"
+      />
+
+      <AddSourceModal 
+        :visible="showAddModal"
+        :creating="creatingSource"
+        @close="showAddModal = false"
+        @create="createSource"
+      />
+
+      <!-- 个人安全中心弹窗 (通行密钥与密码) -->
+      <UserSecurityModal 
+        :visible="showSecurityModal"
+        :user="currentUser"
+        @close="showSecurityModal = false"
+        @user-updated="fetchCurrentUser"
+      />
+
+      <!-- 管理员专属后台管理弹窗 -->
+    </div>
+  
+</template>
+
+<script>
 import { ref, computed, onMounted } from 'vue';
-import Navbar from './components/Navbar.js';
-import SourceList from './components/SourceList.js';
-import OutboundFeed from './components/OutboundFeed.js';
-import NodePool from './components/NodePool.js';
-import SettingsModal from './components/SettingsModal.js';
-import AddSourceModal from './components/AddSourceModal.js';
-import UserSecurityModal from './components/UserSecurityModal.js';
-import AdminPanel from './components/AdminPanel.js';
+import Navbar from './components/Navbar.vue';
+import SourceList from './components/SourceList.vue';
+import OutboundFeed from './components/OutboundFeed.vue';
+import NodePool from './components/NodePool.vue';
+import SettingsModal from './components/SettingsModal.vue';
+import AddSourceModal from './components/AddSourceModal.vue';
+import UserSecurityModal from './components/UserSecurityModal.vue';
+import AdminPanel from './components/AdminPanel.vue';
+import AdminRules from './components/AdminRules.vue';
 
 export default {
   name: 'App',
@@ -19,9 +92,14 @@ export default {
     AddSourceModal,
     UserSecurityModal,
     AdminPanel
+    ,AdminRules
   },
   setup() {
     const currentUser = ref(null);
+    const isAdminRoute = window.location.pathname.startsWith('/admin/');
+    const isAdminRulesRoute = window.location.pathname === '/admin/rules';
+    const navigateAdmin = () => { window.location.href = '/admin/users'; };
+    const navigateHome = () => { window.location.href = '/'; };
     const sources = ref([]);
     const nodes = ref([]);
     const dynamicGroups = ref([]);
@@ -189,10 +267,15 @@ export default {
     const saveSettings = async (newSettings) => {
       savingSettings.value = true;
       try {
+        const personalSettings = Object.fromEntries(
+          ['sub_hash_token', 'subscription_title', 'clash_mixed_port', 'clash_terminal_port', 'custom_direct_domains', 'custom_proxy_domains', 'custom_rules']
+            .filter((key) => newSettings[key] !== undefined)
+            .map((key) => [key, newSettings[key]])
+        );
         const res = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newSettings)
+          body: JSON.stringify(personalSettings)
         });
         if (res.ok) {
           settings.value = JSON.parse(JSON.stringify(newSettings));
@@ -225,6 +308,10 @@ export default {
 
     return {
       currentUser,
+      isAdminRoute,
+      isAdminRulesRoute,
+      navigateAdmin,
+      navigateHome,
       sources,
       nodes,
       dynamicGroups,
@@ -247,75 +334,6 @@ export default {
       saveSettings,
       handleLogout
     };
-  },
-  template: `
-    <div class="max-w-7xl mx-auto px-4 py-8">
-      <Navbar 
-        :version="appVersion"
-        :syncing="syncing"
-        :current-user="currentUser"
-        @open-settings="showSettingsModal = true" 
-        @open-security="showSecurityModal = true"
-        @open-admin="showAdminModal = true"
-        @refresh-all="refreshAll" 
-        @logout="handleLogout"
-      />
-
-      <!-- 主工作区：上游数据源与下游分发中心 -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-10">
-        <div class="lg:col-span-6">
-          <SourceList 
-            :sources="sources" 
-            :refreshing-ids="refreshingIds"
-            @open-add-modal="showAddModal = true"
-            @refresh-source="refreshSource"
-            @delete-source="deleteSource"
-          />
-        </div>
-
-        <div class="lg:col-span-6">
-          <OutboundFeed 
-            :settings="settings"
-            v-model:selected-target="selectedTarget"
-            @open-settings="showSettingsModal = true"
-          />
-        </div>
-      </div>
-
-      <!-- 底部：合并节点池大盘 (聚合动态策略组 + 物理透传平铺，支持折叠) -->
-      <NodePool :nodes="nodes" :dynamic-groups="dynamicGroups" />
-
-      <!-- 设置与添加源模态弹窗 -->
-      <SettingsModal 
-        :visible="showSettingsModal"
-        :settings="settings"
-        :saving="savingSettings"
-        @close="showSettingsModal = false"
-        @save="saveSettings"
-      />
-
-      <AddSourceModal 
-        :visible="showAddModal"
-        :creating="creatingSource"
-        @close="showAddModal = false"
-        @create="createSource"
-      />
-
-      <!-- 个人安全中心弹窗 (通行密钥与密码) -->
-      <UserSecurityModal 
-        :visible="showSecurityModal"
-        :user="currentUser"
-        @close="showSecurityModal = false"
-        @user-updated="fetchCurrentUser"
-      />
-
-      <!-- 管理员专属后台管理弹窗 -->
-      <AdminPanel 
-        v-if="currentUser && currentUser.role === 'admin'"
-        :visible="showAdminModal"
-        :current-admin="currentUser"
-        @close="showAdminModal = false"
-      />
-    </div>
-  `
+  }
 };
+</script>

@@ -8,10 +8,17 @@ Usage:
 import asyncio
 import secrets
 import sys
+
 from sqlalchemy import select
+
 from .db import AsyncSessionLocal, init_db
 from .models import User
-from .security import generate_secure_password, hash_password, validate_password, validate_username
+from .security import (
+    generate_secure_password,
+    hash_password,
+    validate_password,
+    validate_username,
+)
 
 
 async def cmd_reset_admin(args):

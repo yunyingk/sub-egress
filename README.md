@@ -1,8 +1,8 @@
 # sub-egress · 出站网关与多内核订阅调度中枢
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.6-blue.svg" alt="version">
-  <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="python">
+  <img src="https://img.shields.io/badge/version-0.4.0-blue.svg" alt="version">
+  <img src="https://img.shields.io/badge/python-3.14%2B-blue.svg" alt="python">
   <img src="https://img.shields.io/badge/framework-FastAPI-009688.svg" alt="FastAPI">
   <img src="https://img.shields.io/badge/database-PostgreSQL%20%7C%20SQLite-336791.svg" alt="Database">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
@@ -63,6 +63,8 @@ docker compose logs sub-egress
 ```
 浏览器访问 `http://localhost:8000` 即可直接进入单页认证门户！
 
+使用通行密钥前，需设置 `WEBAUTHN_ORIGIN` 为浏览器实际访问的完整来源（例如 `https://sub.example.com`；本地开发可用 `http://localhost:8000`），并确保反向代理保留原始 Host。未配置时，通行密钥接口返回 503，密码登录不受影响。升级已有部署时先配置此值；旧版本可能虚增通行密钥计数器，需先核对已有凭证并准备备用登录方式。
+
 ---
 
 ### 方式 2：Docker 单容器一键运行
@@ -84,9 +86,20 @@ docker logs sub-egress
 如果您不想使用 Docker，也可以直接在个人 Mac / Linux / Windows WSL 上使用 Python 运行：
 ```bash
 git clone https://github.com/yunyingk/sub-egress.git && cd sub-egress
-pip install -r backend/requirements.txt
-cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv sync --locked --extra dev
+uv run --locked uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+也可以不安装 uv，使用 Python 3.14 的虚拟环境和从锁文件导出的依赖清单：
+```bash
+python3.14 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+PYTHONPATH=backend python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+Windows 可改用 `.venv\\Scripts\\activate` 并设置相应的 `PYTHONPATH`。更新依赖时先更新 `uv.lock`，再用 `uv export --locked --no-dev --no-emit-project --no-hashes --no-header -o backend/requirements.txt` 同步导出文件。
+
+旧版数据库升级前请阅读 [UTC 时间迁移说明](docs/UTC时间迁移.md)。PostgreSQL 中旧版无时区时间列必须先确认原始时区并迁移，否则新版会拒绝启动。
 
 ---
 

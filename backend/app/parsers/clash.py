@@ -1,5 +1,6 @@
-from typing import Any, Dict, List, Tuple
 import re
+from typing import Any
+
 import yaml
 
 AD_KEYWORDS = [
@@ -8,7 +9,7 @@ AD_KEYWORDS = [
     "traffic", "reset", "website", "telegram", "notice", "info"
 ]
 
-COUNTRY_PATTERNS: List[Tuple[str, str, str]] = [
+COUNTRY_PATTERNS: list[tuple[str, str, str]] = [
     ("🇭🇰", "HK", r"香港|hongkong|hk"),
     ("🇯🇵", "JP", r"日本|japan|jp|tokyo|osaka"),
     ("🇨🇳", "TW", r"台湾|taiwan|tw|taipei"),
@@ -45,7 +46,7 @@ def is_ad_node(name: str) -> bool:
     lower = name.lower()
     return any(k.lower() in lower for k in AD_KEYWORDS)
 
-def detect_country(name: str) -> Tuple[str, str]:
+def detect_country(name: str) -> tuple[str, str]:
     if not name:
         return "🌐", "OTHER"
     for flag, code, pattern in COUNTRY_PATTERNS:
@@ -53,7 +54,7 @@ def detect_country(name: str) -> Tuple[str, str]:
             return flag, code
     return "🌐", "OTHER"
 
-def is_residential_node(name: str, proxy: Dict[str, Any]) -> bool:
+def is_residential_node(name: str, proxy: dict[str, Any]) -> bool:
     lower_name = (name or "").lower()
     if any(k in lower_name for k in ["家宽", "住宅", "residential", "resip", "rcn", "grande"]):
         return True
@@ -62,12 +63,12 @@ def is_residential_node(name: str, proxy: Dict[str, Any]) -> bool:
         return True
     return False
 
-def extract_subscription_extra_info(text: str) -> Dict[str, Any]:
+def extract_subscription_extra_info(text: str) -> dict[str, Any]:
     """
     Extract extra metadata embedded by airports (e.g. pseudo-node comments)
     such as reset countdown and remaining traffic.
     """
-    info: Dict[str, Any] = {}
+    info: dict[str, Any] = {}
     if not text:
         return info
     
@@ -83,7 +84,7 @@ def extract_subscription_extra_info(text: str) -> Dict[str, Any]:
         
     return info
 
-def parse_clash_yaml(content: str) -> List[Dict[str, Any]]:
+def parse_clash_yaml(content: str) -> list[dict[str, Any]]:
     try:
         data = yaml.safe_load(content)
     except Exception:

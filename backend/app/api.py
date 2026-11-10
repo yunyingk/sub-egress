@@ -1,13 +1,24 @@
 import asyncio
 import base64
-from datetime import datetime
 import os
-from pathlib import Path
 import secrets
 import time
-from typing import Any, Dict, List, Optional
 import urllib.parse
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated, Any
+
+import httpx
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
@@ -21,15 +32,21 @@ from .auth_webauthn import (
     verify_and_consume_challenge,
     verify_authentication_assertion,
 )
-from .builder import build_base64_config, build_clash_config, build_singbox_config, extract_dynamic_groups
+from .builder import (
+    build_base64_config,
+    build_clash_config,
+    build_singbox_config,
+    extract_dynamic_groups,
+)
 from .db import get_db
-from .models import Node, PasskeyCredential, Setting, Source, User
+from .models import Node, OAuthIdentity, PasskeyCredential, Setting, Source, User
 from .parsers.clash import extract_subscription_extra_info
 from .security import (
     create_session_token,
     generate_secure_password,
     hash_password,
     validate_password,
+    validate_username,
     verify_password,
     verify_session_token,
 )
@@ -37,8 +54,77 @@ from .syncer import ping_single_node, sync_single_source
 from .version import VERSION
 
 router = APIRouter()
+GITHUB_OAUTH_ISSUER = "https://github.com"
 
-SECRET_KEY = os.getenv("SECRET_KEY", "sub-egress-secure-signing-salt-key-v3")
+@router.get("/api/auth/github/start", include_in_schema=False)
+async def github_oauth_start(request: Request, db: Annotated[AsyncSession, Depends(get_db)], mode: str = "login"):
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id or not os.getenv("GITHUB_CLIENT_SECRET") or not os.getenv("GITHUB_REDIRECT_URI"):
+        raise HTTPException(status_code=503, detail="GitHub OAuth 尚未配置")
+    if mode not in {"login", "link"}:
+        raise HTTPException(status_code=400, detail="OAuth mode 无效")
+    state = secrets.token_urlsafe(32)
+    local_user_id = None
+    if mode == "link":
+        local_user = await get_current_user_optional(request, db, request.cookies.get("sub_egress_session"))
+        if not local_user:
+            raise HTTPException(status_code=401, detail="绑定 GitHub 前请先登录")
+        local_user_id = local_user.id
+    signed_state = create_session_token({"oauth_state": state, "mode": mode, "user_id": local_user_id}, SECRET_KEY, 600)
+    response = RedirectResponse("https://github.com/login/oauth/authorize?" + urllib.parse.urlencode({"client_id": client_id, "redirect_uri": os.environ["GITHUB_REDIRECT_URI"], "scope": "read:user", "state": state}), status_code=302)
+    response.set_cookie("github_oauth_state", signed_state, httponly=True, secure=True, samesite="lax", max_age=600, path="/")
+    return response
+
+@router.get("/api/auth/github/callback", include_in_schema=False)
+async def github_oauth_callback(request: Request, db: Annotated[AsyncSession, Depends(get_db)], code: str, state: str, github_oauth_state: Annotated[str | None, Cookie()] = None):
+    state_data = verify_session_token(github_oauth_state or "", SECRET_KEY)
+    if not state_data or not secrets.compare_digest(state_data.get("oauth_state", ""), state):
+        raise HTTPException(status_code=400, detail="GitHub OAuth state 无效或已过期")
+    async with httpx.AsyncClient(timeout=10, headers={"Accept": "application/json", "User-Agent": "sub-egress"}) as client:
+        token_response = await client.post("https://github.com/login/oauth/access_token", data={"client_id": os.environ["GITHUB_CLIENT_ID"], "client_secret": os.environ["GITHUB_CLIENT_SECRET"], "code": code, "redirect_uri": os.environ["GITHUB_REDIRECT_URI"], "state": state})
+        token_response.raise_for_status()
+        access_token = token_response.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=401, detail="GitHub 未授予访问令牌")
+        profile_response = await client.get("https://api.github.com/user", headers={"Authorization": f"Bearer {access_token}"})
+        profile_response.raise_for_status()
+        profile = profile_response.json()
+    subject = str(profile["id"])
+    identity_result = await db.execute(select(OAuthIdentity).where(OAuthIdentity.issuer == GITHUB_OAUTH_ISSUER, OAuthIdentity.subject == subject))
+    identity = identity_result.scalar_one_or_none()
+    if state_data.get("mode") == "link":
+        user = await db.get(User, state_data.get("user_id"))
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="待绑定的本地账号不可用")
+        if identity and identity.user_id != user.id:
+            raise HTTPException(status_code=409, detail="此 GitHub 账号已绑定到其他用户")
+        if not identity:
+            identity = OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject)
+            db.add(identity)
+    else:
+        user = await db.get(User, identity.user_id) if identity else None
+        if not user:
+            github_name = "gh" + subject
+            username = github_name[:20]
+            exists = await db.execute(select(User.id).where(User.username == username))
+            if exists.scalar_one_or_none():
+                username = "gh" + secrets.token_hex(8)
+            user = User(username=username, role="user", is_active=True, sub_hash_token=secrets.token_hex(24), subscription_title="sub-egress", clash_mixed_port="7897", clash_terminal_port="7898")
+            db.add(user)
+            await db.flush()
+            db.add(OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject))
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账户已禁用")
+    user.last_login_at = datetime.now(UTC)
+    await db.commit()
+    response = RedirectResponse("/" if state_data.get("mode") == "login" else "/", status_code=302)
+    response.delete_cookie("github_oauth_state", path="/")
+    set_auth_cookie(response, user)
+    return response
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be configured with a private random value")
 
 DEFAULT_SETTINGS = {
     "sub_hash_token": "e699ffd91845385075b27d813b8590df40375c6af2c4eb77",
@@ -54,7 +140,7 @@ DEFAULT_SETTINGS = {
     "profile_web_url": ""
 }
 
-async def get_system_settings(db: AsyncSession) -> Dict[str, str]:
+async def get_system_settings(db: AsyncSession) -> dict[str, str]:
     stmt = select(Setting)
     res = await db.execute(stmt)
     db_settings = {s.key: s.value for s in res.scalars().all()}
@@ -97,13 +183,11 @@ def set_auth_cookie(response: Response, user: User) -> str:
 
 async def get_current_user_optional(
     request: Request,
-    sub_egress_session: Optional[str] = Cookie(None),
-    authorization: Optional[str] = Header(None),
-    x_authentik_username: Optional[str] = Header(None),
-    x_forwarded_user: Optional[str] = Header(None),
-    db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    """优先从 Cookie 读取 Session，其次从 Bearer 头部，再次从 Authentik 代理头读取"""
+    db: Annotated[AsyncSession, Depends(get_db)],
+    sub_egress_session: Annotated[str | None, Cookie()] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> User | None:
+    """只接受本应用签发的会话，不信任客户端可伪造的身份头。"""
     token = sub_egress_session
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization[7:].strip()
@@ -118,20 +202,11 @@ async def get_current_user_optional(
             if user and user.is_active:
                 return user
 
-    # 兼容 Authentik 反向代理显性头
-    sso_username = (x_authentik_username or x_forwarded_user or "").strip().lower()
-    if sso_username:
-        stmt = select(User).where(User.username == sso_username)
-        res = await db.execute(stmt)
-        user = res.scalar_one_or_none()
-        if user and user.is_active:
-            return user
-
     return None
 
 
 async def get_current_user(
-    user: Optional[User] = Depends(get_current_user_optional)
+    user: Annotated[User | None, Depends(get_current_user_optional)]
 ) -> User:
     if not user:
         raise HTTPException(status_code=401, detail="请先登录后再进行操作")
@@ -139,7 +214,7 @@ async def get_current_user(
 
 
 async def get_current_admin(
-    user: User = Depends(get_current_user)
+    user: Annotated[User, Depends(get_current_user)]
 ) -> User:
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="权限不足：需要管理员身份")
@@ -157,17 +232,19 @@ class RegisterPayload(BaseModel):
     password: str
 
 class ChangePasswordPayload(BaseModel):
-    old_password: Optional[str] = None
+    old_password: str | None = None
     new_password: str
 
 @router.post("/api/auth/login", summary="用户账号密码登录")
-async def auth_login(payload: LoginPayload, response: Response, db: AsyncSession = Depends(get_db)):
-    u_str = payload.username.strip()
-    p_str = payload.password.strip()
+async def auth_login(payload: LoginPayload, response: Response, db: Annotated[AsyncSession, Depends(get_db)]):
+    u_str = payload.username
+    p_str = payload.password
 
     # 规范拦截校验：严禁大写字母
-    if any(c.isupper() for c in u_str):
-        raise HTTPException(status_code=400, detail="用户名严禁包含大写字母，请检查输入")
+    from .security import validate_username
+    username_valid, username_error = validate_username(u_str)
+    if not username_valid:
+        raise HTTPException(status_code=400, detail=username_error)
     if any(c.isupper() for c in p_str):
         raise HTTPException(status_code=400, detail="密码严禁包含大写字母，请使用小写字母、数字和符号")
 
@@ -183,7 +260,7 @@ async def auth_login(payload: LoginPayload, response: Response, db: AsyncSession
     if not user.password_hash or not verify_password(p_str, user.password_hash):
         raise HTTPException(status_code=400, detail="用户名或密码错误")
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(UTC)
     await db.commit()
 
     token = set_auth_cookie(response, user)
@@ -206,7 +283,7 @@ async def auth_login(payload: LoginPayload, response: Response, db: AsyncSession
 
 
 @router.post("/api/auth/register", summary="新用户自主注册")
-async def auth_register(payload: RegisterPayload, response: Response, db: AsyncSession = Depends(get_db)):
+async def auth_register(payload: RegisterPayload, response: Response, db: Annotated[AsyncSession, Depends(get_db)]):
     # 彻底关闭新用户自主注册功能
     raise HTTPException(
         status_code=403,
@@ -215,7 +292,7 @@ async def auth_register(payload: RegisterPayload, response: Response, db: AsyncS
 
 
 @router.get("/api/auth/me", summary="获取当前登录用户信息")
-async def auth_me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def auth_me(user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     # 统计用户通行密钥数量
     pk_stmt = select(PasskeyCredential).where(PasskeyCredential.user_id == user.id)
     pk_res = await db.execute(pk_stmt)
@@ -252,39 +329,42 @@ async def auth_logout(response: Response):
 async def auth_sso_callback(
     request: Request,
     response: Response,
-    x_authentik_username: Optional[str] = Header(None),
-    x_authentik_email: Optional[str] = Header(None),
-    x_forwarded_user: Optional[str] = Header(None),
-    db: AsyncSession = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_authentik_username: Annotated[str | None, Header()] = None,
+    x_authentik_email: Annotated[str | None, Header()] = None,
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_authentik_uid: Annotated[str | None, Header()] = None,
 ):
     sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
-    if not sso_user:
+    sso_subject = (x_authentik_uid or "").strip()
+    if not sso_user or not sso_subject:
         # 若未携带 SSO 鉴权身份头，退回登录页
         return RedirectResponse(url="/login?error=sso_unauthorized", status_code=302)
 
-    # 1. 优先按用户名或已绑定的 oauth_id 查找
-    stmt = select(User).where((User.username == sso_user) | (User.oauth_id == sso_user))
-    res = await db.execute(stmt)
-    user = res.scalar_one_or_none()
-
-    # 2. 若未匹配到，且当前系统仅有唯一 admin 用户且未绑定 oauth：
-    # 自动关联 admin 账号（支持管理员初次通过 SSO 直接进入系统）
+    # Resolve by stable provider subject. Never link accounts by a mutable username.
+    identity_result = await db.execute(
+        select(OAuthIdentity).where(OAuthIdentity.issuer == "authentik", OAuthIdentity.subject == sso_subject)
+    )
+    identity = identity_result.scalar_one_or_none()
+    user = await db.get(User, identity.user_id) if identity else None
     if not user:
-        count_stmt = select(func.count(User.id))
-        total_users = (await db.execute(count_stmt)).scalar() or 0
-        if total_users == 1:
-            admin_stmt = select(User).where(User.role == "admin")
-            admin_user = (await db.execute(admin_stmt)).scalar_one_or_none()
-            if admin_user and not admin_user.oauth_provider:
-                admin_user.oauth_provider = "authentik"
-                admin_user.oauth_id = sso_user
-                user = admin_user
+        legacy_result = await db.execute(
+            select(User).where(User.oauth_provider == "authentik", User.oauth_id == sso_user)
+        )
+        user = legacy_result.scalar_one_or_none()
 
-    # 3. 若仍无用户，为该 SSO 用户自动开通专属独立账号与订阅令牌
+    # Create a separate account for a new provider subject; don't attach by username.
     if not user:
         token = secrets.token_hex(24)
+        candidate = sso_user
+        valid_username, _ = validate_username(candidate)
+        if not valid_username:
+            candidate = "user" + "".join(c for c in sso_subject.lower() if c.isalnum())[:15]
+        existing_name = await db.execute(select(User.id).where(User.username == candidate))
+        if existing_name.scalar_one_or_none():
+            candidate = "user" + "".join(c for c in sso_subject.lower() if c.isalnum())[:15]
         user = User(
-            username=sso_user,
+            username=candidate,
             role="user",
             is_active=True,
             sub_hash_token=token,
@@ -295,11 +375,15 @@ async def auth_sso_callback(
             clash_terminal_port="7898"
         )
         db.add(user)
+        await db.flush()
+
+    if not identity:
+        db.add(OAuthIdentity(user_id=user.id, provider="authentik", issuer="authentik", subject=sso_subject))
 
     if not user.is_active:
         return RedirectResponse(url="/login?error=account_disabled", status_code=302)
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(user)
 
@@ -311,8 +395,8 @@ async def auth_sso_callback(
 @router.post("/api/auth/change-password", summary="当前用户修改密码")
 async def auth_change_password(
     payload: ChangePasswordPayload,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     if user.password_hash:
         if not payload.old_password or not verify_password(payload.old_password, user.password_hash):
@@ -333,20 +417,32 @@ class PasskeyRegisterFinishPayload(BaseModel):
     id: str
     rawId: str
     type: str
-    name: Optional[str] = "我的通行密钥"
-    response: Dict[str, Any]
+    name: str | None = "我的通行密钥"
+    response: dict[str, Any]
 
 class PasskeyLoginFinishPayload(BaseModel):
     id: str
     rawId: str
     type: str
-    response: Dict[str, Any]
+    response: dict[str, Any]
+
+
+def _webauthn_site(request: Request) -> tuple[str, str]:
+    origin = os.getenv("WEBAUTHN_ORIGIN", "").strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(origin)
+    if (not parsed.hostname or parsed.username or parsed.password or parsed.path
+            or parsed.query or parsed.fragment
+            or (parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname == "localhost"))):
+        raise HTTPException(status_code=503, detail="请配置有效的 WEBAUTHN_ORIGIN 后使用通行密钥")
+    if request.headers.get("host", "").lower() != parsed.netloc.lower():
+        raise HTTPException(status_code=400, detail="请求域名与通行密钥配置不一致")
+    return parsed.hostname, origin
 
 @router.post("/api/auth/passkey/register/start", summary="发起通行密钥注册挑战")
 async def passkey_register_start(
     request: Request,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     # 硬限制：每个账号最多只允许绑定 5 个通行密钥
     count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
@@ -357,7 +453,7 @@ async def passkey_register_start(
             detail="每个账号最多只允许绑定 5 个通行密钥。请在安全中心解绑多余设备后再添加新密钥。"
         )
 
-    host = request.headers.get("host", "sub.ying-qing.cn").split(":")[0]
+    host, _ = _webauthn_site(request)
     challenge = generate_challenge(f"reg:{user.id}", ttl_seconds=300)
 
     return {
@@ -388,10 +484,10 @@ async def passkey_register_start(
 async def passkey_register_finish(
     request: Request,
     payload: PasskeyRegisterFinishPayload,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    host = request.headers.get("host", "sub.ying-qing.cn").split(":")[0]
+    host, origin = _webauthn_site(request)
     reg_key = f"reg:{user.id}"
     
     # 获取之前缓存的 challenge
@@ -403,19 +499,25 @@ async def passkey_register_finish(
     attestation_b64 = payload.response.get("attestationObject")
     if not client_data_b64 or not attestation_b64:
         raise HTTPException(status_code=400, detail="缺少 WebAuthn 注册凭证数据")
+    if payload.type != "public-key" or payload.id != payload.rawId:
+        raise HTTPException(status_code=400, detail="通行密钥凭证标识无效")
 
     try:
         cred_info = parse_and_verify_registration(
             client_data_json_b64=client_data_b64,
             attestation_obj_b64=attestation_b64,
             expected_challenge=stored,
-            rp_id=host
+            rp_id=host,
+            expected_origin=origin,
         )
+        if payload.id != cred_info["credential_id"]:
+            raise ValueError("WebAuthn credential ID mismatch")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"通行密钥注册校验失败: {e}")
+        raise HTTPException(status_code=400, detail=f"通行密钥注册校验失败: {e}") from e
 
     # 消费 Challenge
-    verify_and_consume_challenge(reg_key, stored)
+    if not verify_and_consume_challenge(reg_key, stored):
+        raise HTTPException(status_code=400, detail="通行密钥注册挑战已失效")
 
     # 硬限制：每个账号最多只允许绑定 5 个通行密钥
     count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
@@ -446,10 +548,15 @@ async def passkey_register_finish(
 @router.post("/api/auth/passkey/login/start", summary="发起通行密钥免密登录挑战")
 async def passkey_login_start(
     request: Request,
-    username: Optional[str] = Query(None)
+    response: Response,
+    username: Annotated[str | None, Query()] = None
 ):
-    host = request.headers.get("host", "sub.ying-qing.cn").split(":")[0]
-    challenge = generate_challenge("login_assertion", ttl_seconds=300)
+    host, origin = _webauthn_site(request)
+    login_id = secrets.token_urlsafe(32)
+    challenge = generate_challenge(f"login:{login_id}", ttl_seconds=300)
+    response.set_cookie("webauthn_login", login_id, max_age=300, httponly=True,
+                        secure=origin.startswith("https://"), samesite="strict",
+                        path="/api/auth/passkey/login")
 
     return {
         "challenge": challenge,
@@ -464,10 +571,12 @@ async def passkey_login_finish(
     request: Request,
     payload: PasskeyLoginFinishPayload,
     response: Response,
-    db: AsyncSession = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)],
+    webauthn_login: Annotated[str | None, Cookie()] = None,
 ):
-    host = request.headers.get("host", "sub.ying-qing.cn").split(":")[0]
-    stored = _get_stored_challenge("login_assertion")
+    host, origin = _webauthn_site(request)
+    login_key = f"login:{webauthn_login}"
+    stored = _get_stored_challenge(login_key) if webauthn_login else None
     if not stored:
         raise HTTPException(status_code=400, detail="登录挑战已失效或过期，请重新点击登录")
 
@@ -477,6 +586,8 @@ async def passkey_login_finish(
 
     if not client_data_b64 or not auth_data_b64 or not sig_b64:
         raise HTTPException(status_code=400, detail="缺少通行密钥认证数据")
+    if payload.type != "public-key" or payload.id != payload.rawId:
+        raise HTTPException(status_code=400, detail="通行密钥凭证标识无效")
 
     # 根据 credential_id 查找绑定记录
     cred_id = payload.id
@@ -502,17 +613,20 @@ async def passkey_login_finish(
             expected_challenge=stored,
             public_key_pem=passkey.public_key,
             expected_rp_id=host,
+            expected_origin=origin,
             stored_sign_count=passkey.sign_count
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"通行密钥验签失败: {e}")
+        raise HTTPException(status_code=400, detail=f"通行密钥验签失败: {e}") from e
 
     # 消费 challenge
-    verify_and_consume_challenge("login_assertion", stored)
+    if not verify_and_consume_challenge(login_key, stored):
+        raise HTTPException(status_code=400, detail="登录挑战已失效")
+    response.delete_cookie("webauthn_login", path="/api/auth/passkey/login")
 
     passkey.sign_count = new_sign_count
-    passkey.last_used_at = datetime.utcnow()
-    user.last_login_at = datetime.utcnow()
+    passkey.last_used_at = datetime.now(UTC)
+    user.last_login_at = datetime.now(UTC)
     await db.commit()
 
     token = set_auth_cookie(response, user)
@@ -529,7 +643,7 @@ async def passkey_login_finish(
     }
 
 
-def _get_stored_challenge(key: str) -> Optional[str]:
+def _get_stored_challenge(key: str) -> str | None:
     from .auth_webauthn import _CHALLENGES
     item = _CHALLENGES.get(key)
     if item and item[1] > time.time():
@@ -540,18 +654,18 @@ def _get_stored_challenge(key: str) -> Optional[str]:
 # ==================== 用户个人设置 API ====================
 
 class UserSettingsPayload(BaseModel):
-    subscription_title: Optional[str] = None
-    clash_mixed_port: Optional[str] = None
-    clash_terminal_port: Optional[str] = None
-    custom_direct_domains: Optional[str] = None
-    custom_proxy_domains: Optional[str] = None
-    custom_rules: Optional[str] = None
+    subscription_title: str | None = None
+    clash_mixed_port: str | None = None
+    clash_terminal_port: str | None = None
+    custom_direct_domains: str | None = None
+    custom_proxy_domains: str | None = None
+    custom_rules: str | None = None
 
 @router.post("/api/user/settings", summary="保存当前用户专属订阅偏好")
 async def update_user_settings(
     payload: UserSettingsPayload,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     if payload.subscription_title is not None:
         user.subscription_title = payload.subscription_title.strip()
@@ -571,8 +685,8 @@ async def update_user_settings(
 
 @router.post("/api/user/regenerate-token", summary="用户重置自身专属订阅令牌")
 async def user_regenerate_token(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     new_token = secrets.token_hex(24)
     user.sub_hash_token = new_token
@@ -582,8 +696,8 @@ async def user_regenerate_token(
 
 @router.get("/api/user/passkeys", summary="获取当前用户绑定的所有通行密钥")
 async def list_user_passkeys(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(PasskeyCredential).where(PasskeyCredential.user_id == user.id).order_by(PasskeyCredential.id)
     res = await db.execute(stmt)
@@ -604,8 +718,8 @@ async def list_user_passkeys(
 @router.delete("/api/user/passkeys/{key_id}", summary="当前用户删除自身指定通行密钥")
 async def delete_user_passkey(
     key_id: int,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(PasskeyCredential).where(PasskeyCredential.id == key_id, PasskeyCredential.user_id == user.id)
     res = await db.execute(stmt)
@@ -618,13 +732,13 @@ async def delete_user_passkey(
 
 
 class BindOAuthPayload(BaseModel):
-    provider: Optional[str] = "authentik"
-    oauth_id: Optional[str] = None
+    provider: str | None = "authentik"
+    oauth_id: str | None = None
 
 @router.post("/api/user/unbind-oauth", summary="当前用户解绑第三方身份源")
 async def user_unbind_oauth(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     # 安全防自锁检查：若用户未设置本地密码且没有任何通行密钥，禁止解绑以防账号无法登录！
     if not user.password_hash:
@@ -645,27 +759,131 @@ async def user_unbind_oauth(
 @router.post("/api/user/bind-oauth", summary="当前用户绑定第三方身份源")
 async def user_bind_oauth(
     payload: BindOAuthPayload,
-    user: User = Depends(get_current_user),
-    x_authentik_username: Optional[str] = Header(None),
-    x_forwarded_user: Optional[str] = Header(None),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_authentik_username: Annotated[str | None, Header()] = None,
+    x_forwarded_user: Annotated[str | None, Header()] = None,
 ):
-    sso_user = (payload.oauth_id or x_authentik_username or x_forwarded_user or user.username).strip()
-    user.oauth_provider = payload.provider or "authentik"
-    user.oauth_id = sso_user
+    raise HTTPException(status_code=410, detail="不再接受客户端提交的身份标识，请通过提供商 OAuth 授权流程绑定")
+
+@router.get("/api/user/identities", summary="列出当前账号已绑定身份")
+async def user_list_identities(user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
+    result = await db.execute(select(OAuthIdentity).where(OAuthIdentity.user_id == user.id).order_by(OAuthIdentity.id))
+    return [{"id": identity.id, "provider": identity.provider, "created_at": identity.created_at.isoformat() if identity.created_at else None} for identity in result.scalars()]
+
+@router.delete("/api/user/identities/{identity_id}", summary="解绑当前账号的指定身份")
+async def user_unlink_identity(identity_id: int, user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
+    result = await db.execute(select(OAuthIdentity).where(OAuthIdentity.id == identity_id, OAuthIdentity.user_id == user.id))
+    identity = result.scalar_one_or_none()
+    if not identity:
+        raise HTTPException(status_code=404, detail="身份绑定不存在")
+    count = await db.scalar(select(func.count(OAuthIdentity.id)).where(OAuthIdentity.user_id == user.id))
+    if count <= 1 and not user.password_hash:
+        passkeys = await db.scalar(select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id))
+        if not passkeys:
+            raise HTTPException(status_code=400, detail="请先设置密码或绑定其他通行密钥，再解绑最后一个登录身份")
+    await db.delete(identity)
     await db.commit()
-    return {"status": "ok", "message": f"已成功绑定第三方登录 ({user.oauth_provider}: {user.oauth_id})"}
+    return {"status": "ok"}
 
 
 # ==================== 管理员管理面板 API (独立页签与专属权限) ====================
 
 class AdminResetPasswordPayload(BaseModel):
-    new_password: Optional[str] = None
+    new_password: str | None = None
+
+class AdminCreateUserPayload(BaseModel):
+    username: str
+    password: str | None = None
+    role: str = "user"
+
+class AdminGlobalRulesPayload(BaseModel):
+    admin_direct_domains: str = ""
+    admin_proxy_domains: str = ""
+    admin_rules: str = ""
+
+class AdminGlobalSettingsPayload(BaseModel):
+    require_token: bool
+    default_target: str
+    update_interval: int
+    write_api_token: str | None = None
+
+@router.get("/api/admin/settings", summary="读取管理员全局设置")
+async def admin_get_settings(admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
+    settings = await get_system_settings(db)
+    return {"require_token": settings.get("require_token", "false").lower() == "true", "default_target": settings.get("default_target", "clash"), "update_interval": settings.get("update_interval", "12"), "write_api_token_configured": bool(settings.get("write_api_token"))}
+
+@router.put("/api/admin/settings", summary="更新管理员全局设置")
+async def admin_put_settings(payload: AdminGlobalSettingsPayload, admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
+    if payload.default_target not in {"clash", "sing-box", "base64"} or not 1 <= payload.update_interval <= 72:
+        raise HTTPException(status_code=400, detail="默认内核或更新间隔无效")
+    values = {"require_token": "true" if payload.require_token else "false", "default_target": payload.default_target, "update_interval": str(payload.update_interval)}
+    if payload.write_api_token is not None:
+        values["write_api_token"] = payload.write_api_token.strip()
+    for key, value in values.items():
+        result = await db.execute(select(Setting).where(Setting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting:
+            setting.value = value
+        else:
+            db.add(Setting(key=key, value=value))
+    await db.commit()
+    return {"status": "ok"}
+
+@router.get("/api/admin/rules", summary="读取管理员全局规则")
+async def admin_get_rules(admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
+    settings = await get_system_settings(db)
+    return {key: settings.get(key, "") for key in ("admin_direct_domains", "admin_proxy_domains", "admin_rules")}
+
+@router.put("/api/admin/rules", summary="更新管理员全局规则")
+async def admin_put_rules(payload: AdminGlobalRulesPayload, admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
+    for key, value in payload.model_dump().items():
+        result = await db.execute(select(Setting).where(Setting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting:
+            setting.value = value.strip()
+        else:
+            db.add(Setting(key=key, value=value.strip()))
+    await db.commit()
+    return {"status": "ok"}
+
+@router.post("/api/admin/users", summary="管理员创建用户")
+async def admin_create_user(
+    payload: AdminCreateUserPayload,
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    valid, message = validate_username(payload.username)
+    if not valid:
+        raise HTTPException(status_code=400, detail=message)
+    if payload.role not in {"user", "admin"}:
+        raise HTTPException(status_code=400, detail="角色只能是 user 或 admin")
+    password = payload.password or generate_secure_password(32)
+    valid, message = validate_password(password)
+    if not valid:
+        raise HTTPException(status_code=400, detail=message)
+    existing = await db.execute(select(User).where(User.username == payload.username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="用户名已存在")
+    user = User(
+        username=payload.username,
+        password_hash=hash_password(password),
+        role=payload.role,
+        is_active=True,
+        sub_hash_token=secrets.token_hex(24),
+        subscription_title="sub-egress",
+        clash_mixed_port="7897",
+        clash_terminal_port="7898",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return {"id": user.id, "username": user.username, "role": user.role, "initial_password": password}
 
 @router.get("/api/admin/users", summary="管理员查看全量用户列表")
 async def admin_list_users(
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(User).options(selectinload(User.passkeys)).order_by(User.id)
     res = await db.execute(stmt)
@@ -703,8 +921,8 @@ async def admin_list_users(
 @router.post("/api/admin/users/{user_id}/activate", summary="管理员激活指定用户")
 async def admin_activate_user(
     user_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(User).where(User.id == user_id)
     res = await db.execute(stmt)
@@ -719,8 +937,8 @@ async def admin_activate_user(
 @router.post("/api/admin/users/{user_id}/deactivate", summary="管理员禁用指定用户")
 async def admin_deactivate_user(
     user_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     if user_id == admin.id:
         raise HTTPException(status_code=400, detail="管理员不能禁用自身账号")
@@ -738,8 +956,8 @@ async def admin_deactivate_user(
 async def admin_reset_user_password(
     user_id: int,
     payload: AdminResetPasswordPayload,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     # 严格硬拦截：管理员严禁在管理面板重设自身密码！
     if user_id == admin.id:
@@ -777,8 +995,8 @@ async def admin_reset_user_password(
 async def admin_unbind_user_passkey(
     user_id: int,
     key_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(PasskeyCredential).where(PasskeyCredential.id == key_id, PasskeyCredential.user_id == user_id)
     res = await db.execute(stmt)
@@ -793,8 +1011,8 @@ async def admin_unbind_user_passkey(
 @router.post("/api/admin/users/{user_id}/unbind-oauth", summary="管理员解绑用户的第三方授权")
 async def admin_unbind_user_oauth(
     user_id: int,
-    admin: User = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db)
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(User).where(User.id == user_id)
     res = await db.execute(stmt)
@@ -809,23 +1027,25 @@ async def admin_unbind_user_oauth(
 
 # ==================== 下游订阅分发端点 (多用户订阅隔离与客户端直连) ====================
 
-@router.api_route("/c/{token}", methods=["GET", "HEAD"], summary="基于专属安全令牌的统一订阅调度端点")
-@router.api_route("/feed", methods=["GET", "HEAD"], summary="标准统一订阅调度端点")
+@router.head("/c/{token}", include_in_schema=False)
+@router.head("/feed", include_in_schema=False)
+@router.get("/c/{token}", summary="基于专属安全令牌的统一订阅调度端点")
+@router.get("/feed", summary="标准统一订阅调度端点")
 async def export_subscription(
     request: Request,
-    token: Optional[str] = None,
-    target: Optional[str] = Query(None, description="目标客户端内核: clash, sing-box, base64"),
-    type: Optional[str] = Query(None, description="别名目标内核: clash, sing-box, base64"),
-    name: Optional[str] = Query(None, description="自定义订阅卡片名称 (显示在客户端)"),
-    title: Optional[str] = Query(None, description="自定义订阅卡片名称 (别名)"),
-    t: Optional[str] = Query(None, description="Query 传递的安全令牌 (用于 /feed)"),
-    db: AsyncSession = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)],
+    token: str | None = None,
+    target: Annotated[str | None, Query(description="目标客户端内核: clash, sing-box, base64")] = None,
+    type: Annotated[str | None, Query(description="别名目标内核: clash, sing-box, base64")] = None,
+    name: Annotated[str | None, Query(description="自定义订阅卡片名称 (显示在客户端)")] = None,
+    title: Annotated[str | None, Query(description="自定义订阅卡片名称 (别名)")] = None,
+    t: Annotated[str | None, Query(description="Query 传递的安全令牌 (用于 /feed)")] = None,
 ):
     settings = await get_system_settings(db)
     req_token = token or t
 
     # 1. 根据专属 Token 查找对应用户 (实现多用户资源隔离)
-    matched_user: Optional[User] = None
+    matched_user: User | None = None
     if req_token:
         u_stmt = select(User).where(User.sub_hash_token == req_token)
         u_res = await db.execute(u_stmt)
@@ -902,21 +1122,21 @@ async def export_subscription(
         if (matched_user and matched_user.custom_direct_domains is not None)
         else settings.get("custom_direct_domains", "ying-qing.cn")
     )
-    direct_domains = [d.strip() for d in (user_direct_raw or "").replace("\n", ",").replace(";", ",").split(",") if d.strip()]
+    direct_domains = [d.strip() for d in (settings.get("admin_direct_domains", "") + "," + (user_direct_raw or "")).replace("\n", ",").replace(";", ",").split(",") if d.strip()]
 
     user_proxy_raw = (
         matched_user.custom_proxy_domains
         if (matched_user and matched_user.custom_proxy_domains is not None)
         else settings.get("custom_proxy_domains", "")
     )
-    proxy_domains = [d.strip() for d in (user_proxy_raw or "").replace("\n", ",").replace(";", ",").split(",") if d.strip()]
+    proxy_domains = [d.strip() for d in (settings.get("admin_proxy_domains", "") + "," + (user_proxy_raw or "")).replace("\n", ",").replace(";", ",").split(",") if d.strip()]
 
     user_rules_raw = (
         matched_user.custom_rules
         if (matched_user and matched_user.custom_rules is not None)
         else settings.get("custom_rules", "")
     )
-    custom_rules_list = [r.strip() for r in (user_rules_raw or "").splitlines() if r.strip() and not r.strip().startswith("#")]
+    custom_rules_list = [r.strip() for r in (settings.get("admin_rules", "") + "\n" + (user_rules_raw or "")).splitlines() if r.strip() and not r.strip().startswith("#")]
 
     # 构建对应内核配置
     if final_target == "clash":
@@ -939,7 +1159,12 @@ async def export_subscription(
         )
         media_type = "text/yaml; charset=utf-8"
     elif final_target == "sing-box":
-        content = build_singbox_config(nodes_list, custom_direct_domains=direct_domains)
+        content = build_singbox_config(
+            nodes_list,
+            custom_direct_domains=direct_domains,
+            custom_proxy_domains=proxy_domains,
+            custom_rules=custom_rules_list,
+        )
         media_type = "application/json; charset=utf-8"
     else:
         content = build_base64_config(nodes_list)
@@ -963,39 +1188,39 @@ async def export_subscription(
 # ==================== 读写设置 API ====================
 
 class SettingsPayload(BaseModel):
-    sub_hash_token: Optional[str] = None
-    require_token: Optional[bool] = None
-    default_target: Optional[str] = None
-    update_interval: Optional[str] = None
-    write_api_token: Optional[str] = None
-    subscription_title: Optional[str] = None
-    clash_mixed_port: Optional[str] = None
-    clash_terminal_port: Optional[str] = None
-    custom_direct_domains: Optional[str] = None
-    custom_proxy_domains: Optional[str] = None
-    custom_rules: Optional[str] = None
+    sub_hash_token: str | None = None
+    require_token: bool | None = None
+    default_target: str | None = None
+    update_interval: str | None = None
+    write_api_token: str | None = None
+    subscription_title: str | None = None
+    clash_mixed_port: str | None = None
+    clash_terminal_port: str | None = None
+    custom_direct_domains: str | None = None
+    custom_proxy_domains: str | None = None
+    custom_rules: str | None = None
 
-@router.get("/api/settings", summary="获取全局读写与安全设置")
-async def get_settings(user: Optional[User] = Depends(get_current_user_optional), db: AsyncSession = Depends(get_db)):
+@router.get("/api/settings", summary="获取当前用户设置")
+async def get_settings(user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     settings = await get_system_settings(db)
     # 若有当前用户，返回该用户专有端口、标题与分流规则
-    sub_title = user.subscription_title if user else settings.get("subscription_title", "sub-egress")
-    m_port = user.clash_mixed_port if user else settings.get("clash_mixed_port", "7897")
-    t_port = user.clash_terminal_port if user else settings.get("clash_terminal_port", "7898")
-    u_token = user.sub_hash_token if user else settings.get("sub_hash_token", "")
+    sub_title = user.subscription_title
+    m_port = user.clash_mixed_port
+    t_port = user.clash_terminal_port
+    u_token = user.sub_hash_token
     direct_domains = (
         user.custom_direct_domains
-        if (user and user.custom_direct_domains is not None)
+        if user.custom_direct_domains is not None
         else settings.get("custom_direct_domains", "ying-qing.cn")
     )
     proxy_domains = (
         user.custom_proxy_domains
-        if (user and user.custom_proxy_domains is not None)
+        if user.custom_proxy_domains is not None
         else settings.get("custom_proxy_domains", "")
     )
     custom_rules = (
         user.custom_rules
-        if (user and user.custom_rules is not None)
+        if user.custom_rules is not None
         else settings.get("custom_rules", "")
     )
 
@@ -1005,7 +1230,7 @@ async def get_settings(user: Optional[User] = Depends(get_current_user_optional)
         "require_token": settings.get("require_token", "false").lower() == "true",
         "default_target": settings.get("default_target", "clash"),
         "update_interval": settings.get("update_interval", "12"),
-        "write_api_token": settings.get("write_api_token", ""),
+        "write_api_token": "",
         "subscription_title": sub_title,
         "clash_mixed_port": m_port,
         "clash_terminal_port": t_port,
@@ -1018,75 +1243,44 @@ async def get_settings(user: Optional[User] = Depends(get_current_user_optional)
 @router.post("/api/settings", summary="保存全局读写设置")
 async def update_settings(
     payload: SettingsPayload,
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     updates = {}
+    if any(value is not None for value in (payload.require_token, payload.default_target, payload.update_interval, payload.write_api_token)):
+        raise HTTPException(status_code=403, detail="全局安全设置仅管理员可修改")
     if payload.sub_hash_token is not None:
-        updates["sub_hash_token"] = payload.sub_hash_token.strip()
-        if user:
-            user.sub_hash_token = payload.sub_hash_token.strip()
-    if payload.require_token is not None:
-        updates["require_token"] = "true" if payload.require_token else "false"
-    if payload.default_target is not None:
-        updates["default_target"] = payload.default_target.strip().lower()
-    if payload.update_interval is not None:
-        updates["update_interval"] = payload.update_interval.strip()
-    if payload.write_api_token is not None:
-        updates["write_api_token"] = payload.write_api_token.strip()
+        user.sub_hash_token = payload.sub_hash_token.strip()
     if payload.subscription_title is not None:
         updates["subscription_title"] = payload.subscription_title.strip()
-        if user:
-            user.subscription_title = payload.subscription_title.strip()
+        user.subscription_title = payload.subscription_title.strip()
     if payload.clash_mixed_port is not None:
         updates["clash_mixed_port"] = str(payload.clash_mixed_port).strip()
-        if user:
-            user.clash_mixed_port = str(payload.clash_mixed_port).strip()
+        user.clash_mixed_port = str(payload.clash_mixed_port).strip()
     if payload.clash_terminal_port is not None:
         updates["clash_terminal_port"] = str(payload.clash_terminal_port).strip()
-        if user:
-            user.clash_terminal_port = str(payload.clash_terminal_port).strip()
+        user.clash_terminal_port = str(payload.clash_terminal_port).strip()
     if payload.custom_direct_domains is not None:
         updates["custom_direct_domains"] = payload.custom_direct_domains.strip()
-        if user:
-            user.custom_direct_domains = payload.custom_direct_domains.strip()
+        user.custom_direct_domains = payload.custom_direct_domains.strip()
     if payload.custom_proxy_domains is not None:
         updates["custom_proxy_domains"] = payload.custom_proxy_domains.strip()
-        if user:
-            user.custom_proxy_domains = payload.custom_proxy_domains.strip()
+        user.custom_proxy_domains = payload.custom_proxy_domains.strip()
     if payload.custom_rules is not None:
         updates["custom_rules"] = payload.custom_rules.strip()
-        if user:
-            user.custom_rules = payload.custom_rules.strip()
+        user.custom_rules = payload.custom_rules.strip()
 
-    for k, v in updates.items():
-        stmt = select(Setting).where(Setting.key == k)
-        res = await db.execute(stmt)
-        setting = res.scalar_one_or_none()
-        if setting:
-            setting.value = v
-        else:
-            db.add(Setting(key=k, value=v))
     await db.commit()
     return {"status": "success", "message": "Settings updated"}
 
 
 @router.post("/api/settings/regenerate-token", summary="重新生成安全哈希令牌")
 async def regenerate_token(
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     new_token = secrets.token_hex(24)
-    if user:
-        user.sub_hash_token = new_token
-
-    stmt = select(Setting).where(Setting.key == "sub_hash_token")
-    res = await db.execute(stmt)
-    setting = res.scalar_one_or_none()
-    if setting:
-        setting.value = new_token
-    else:
-        db.add(Setting(key="sub_hash_token", value=new_token))
+    user.sub_hash_token = new_token
     await db.commit()
     return {"status": "success", "new_token": new_token}
 
@@ -1096,21 +1290,21 @@ async def regenerate_token(
 class SourceCreate(BaseModel):
     name: str
     url: str
-    source_type: Optional[str] = "auto"
-    raw_content: Optional[str] = None
-    is_shared: Optional[bool] = True
+    source_type: str | None = "auto"
+    raw_content: str | None = None
+    is_shared: bool | None = True
 
 class SourceUpdate(BaseModel):
-    name: Optional[str] = None
-    url: Optional[str] = None
-    enabled: Optional[bool] = None
-    raw_content: Optional[str] = None
-    is_shared: Optional[bool] = None
+    name: str | None = None
+    url: str | None = None
+    enabled: bool | None = None
+    raw_content: str | None = None
+    is_shared: bool | None = None
 
 @router.get("/api/sources", summary="获取上游源列表")
 async def list_sources(
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(Source).order_by(Source.id)
     if user and user.role != "admin":
@@ -1144,8 +1338,8 @@ async def list_sources(
 @router.post("/api/sources", summary="新增上游源")
 async def create_source(
     payload: SourceCreate,
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     is_shared = payload.is_shared if (user and user.role == "admin") else (user is None)
     src = Source(
@@ -1168,8 +1362,8 @@ async def create_source(
 async def update_source(
     source_id: int,
     payload: SourceUpdate,
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(Source).where(Source.id == source_id)
     res = await db.execute(stmt)
@@ -1198,8 +1392,8 @@ async def update_source(
 @router.delete("/api/sources/{source_id}", summary="删除上游源")
 async def delete_source(
     source_id: int,
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(Source).where(Source.id == source_id)
     res = await db.execute(stmt)
@@ -1217,8 +1411,8 @@ async def delete_source(
 @router.post("/api/sources/{source_id}/refresh", summary="手动刷新指定上游源")
 async def refresh_source(
     source_id: int,
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     success = await sync_single_source(source_id, db)
     if not success:
@@ -1234,8 +1428,8 @@ async def refresh_source(
 
 @router.get("/api/nodes", summary="获取平铺节点池与动态策略组")
 async def list_nodes(
-    user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    user: Annotated[User | None, Depends(get_current_user_optional)],
+    db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = (
         select(Node, Source.name.label("source_name"))
@@ -1288,10 +1482,10 @@ async def list_nodes(
 # ==================== 节点延迟测速 API ====================
 
 class BatchPingPayload(BaseModel):
-    node_ids: Optional[List[int]] = None
+    node_ids: list[int] | None = None
 
 @router.post("/api/nodes/{node_id}/ping", summary="测试单个节点网络握手延迟")
-async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
+async def ping_node_endpoint(node_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
     stmt = select(Node).where(Node.id == node_id)
     res = await db.execute(stmt)
     node = res.scalar_one_or_none()
@@ -1301,7 +1495,7 @@ async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
     result = await ping_single_node(node.server, node.port, node.node_type)
     node.latency = result["latency"]
     node.latency_status = result["status"]
-    node.latency_updated_at = datetime.utcnow()
+    node.latency_updated_at = datetime.now(UTC)
     await db.commit()
 
     return {
@@ -1313,7 +1507,7 @@ async def ping_node_endpoint(node_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 @router.post("/api/nodes/ping", summary="批量并发测试节点延迟")
-async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: AsyncSession = Depends(get_db)):
+async def batch_ping_nodes(db: Annotated[AsyncSession, Depends(get_db)], payload: BatchPingPayload | None = None):
     stmt = select(Node)
     if payload and payload.node_ids:
         stmt = stmt.where(Node.id.in_(payload.node_ids))
@@ -1327,7 +1521,7 @@ async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: Async
             res = await ping_single_node(node.server, node.port, node.node_type, timeout=2.5)
             node.latency = res["latency"]
             node.latency_status = res["status"]
-            node.latency_updated_at = datetime.utcnow()
+            node.latency_updated_at = datetime.now(UTC)
             return node.id, res
 
     tasks = [worker(n) for n in nodes]
@@ -1341,7 +1535,7 @@ async def batch_ping_nodes(payload: Optional[BatchPingPayload] = None, db: Async
 
 @router.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "sub-egress", "version": VERSION, "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "service": "sub-egress", "version": VERSION, "timestamp": datetime.now(UTC).isoformat()}
 
 @router.get("/api/version", summary="获取服务版本号")
 async def get_version():

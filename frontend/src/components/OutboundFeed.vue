@@ -1,127 +1,4 @@
-import { ref, computed, watch, nextTick } from 'vue';
-
-export default {
-  name: 'OutboundFeed',
-  props: {
-    settings: { type: Object, required: true },
-    selectedTarget: { type: String, default: 'clash' }
-  },
-  emits: ['update:selectedTarget', 'openSettings'],
-  setup(props, { emit }) {
-    const copied = ref(false);
-    const showQr = ref(false);
-    let hoverTimeout = null;
-    const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
-
-    const onNameChange = () => {
-      if (customName.value && customName.value.trim()) {
-        localStorage.setItem('sub_egress_custom_name', customName.value.trim());
-      } else {
-        localStorage.removeItem('sub_egress_custom_name');
-      }
-    };
-
-    const defaultPlaceholder = computed(() => {
-      return props.settings.subscription_title || 'sub-egress';
-    });
-
-    const activeSubscriptionUrl = computed(() => {
-      const origin = window.location.origin;
-      const token = props.settings.sub_hash_token;
-      const target = props.selectedTarget;
-      const params = new URLSearchParams();
-      params.append('target', target);
-      if (customName.value && customName.value.trim()) {
-        params.append('name', customName.value.trim());
-      }
-      const queryStr = params.toString();
-      if (token) {
-        return `${origin}/c/${token}?${queryStr}`;
-      }
-      return `${origin}/feed?${queryStr}`;
-    });
-
-    const formatExt = computed(() => {
-      if (props.selectedTarget === 'sing-box') return 'JSON (Sing-box)';
-      if (props.selectedTarget === 'base64') return 'TXT (Base64)';
-      return 'YAML (Mihomo)';
-    });
-
-    const clashSchemeUrl = computed(() => {
-      return `clash://install-config?url=${encodeURIComponent(activeSubscriptionUrl.value)}&name=${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
-    });
-
-    const singboxSchemeUrl = computed(() => {
-      return `sing-box://import-remote-profile?url=${encodeURIComponent(activeSubscriptionUrl.value)}#${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
-    });
-
-    const renderQrCode = () => {
-      nextTick(() => {
-        const container = document.getElementById('qrcode-container-box');
-        if (!container) return;
-        container.innerHTML = '';
-        if (window.QRCode) {
-          new window.QRCode(container, {
-            text: activeSubscriptionUrl.value,
-            width: 170,
-            height: 170,
-            colorDark: "#0f172a",
-            colorLight: "#ffffff",
-            correctLevel: window.QRCode.CorrectLevel.M
-          });
-        }
-      });
-    };
-
-    const toggleQr = () => {
-      showQr.value = !showQr.value;
-      if (showQr.value) renderQrCode();
-    };
-
-    const onMouseEnterQr = () => {
-      clearTimeout(hoverTimeout);
-      showQr.value = true;
-      renderQrCode();
-    };
-
-    const onMouseLeaveQr = () => {
-      hoverTimeout = setTimeout(() => {
-        showQr.value = false;
-      }, 300);
-    };
-
-    watch(activeSubscriptionUrl, () => {
-      if (showQr.value) renderQrCode();
-    });
-
-    const copySubscriptionUrl = () => {
-      navigator.clipboard.writeText(activeSubscriptionUrl.value);
-      copied.value = true;
-      setTimeout(() => { copied.value = false; }, 2500);
-    };
-
-    const setTarget = (t) => {
-      emit('update:selectedTarget', t);
-    };
-
-    return {
-      copied,
-      showQr,
-      customName,
-      onNameChange,
-      defaultPlaceholder,
-      activeSubscriptionUrl,
-      formatExt,
-      clashSchemeUrl,
-      singboxSchemeUrl,
-      toggleQr,
-      onMouseEnterQr,
-      onMouseLeaveQr,
-      copySubscriptionUrl,
-      setTarget
-    };
-  },
-  template: `
+<template>
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -280,5 +157,132 @@ export default {
         </div>
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import { ref, computed, watch, nextTick } from 'vue';
+
+export default {
+  name: 'OutboundFeed',
+  props: {
+    settings: { type: Object, required: true },
+    selectedTarget: { type: String, default: 'clash' }
+  },
+  emits: ['update:selectedTarget', 'openSettings'],
+  setup(props, { emit }) {
+    const copied = ref(false);
+    const showQr = ref(false);
+    let hoverTimeout = null;
+    const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
+
+    const onNameChange = () => {
+      if (customName.value && customName.value.trim()) {
+        localStorage.setItem('sub_egress_custom_name', customName.value.trim());
+      } else {
+        localStorage.removeItem('sub_egress_custom_name');
+      }
+    };
+
+    const defaultPlaceholder = computed(() => {
+      return props.settings.subscription_title || 'sub-egress';
+    });
+
+    const activeSubscriptionUrl = computed(() => {
+      const origin = window.location.origin;
+      const token = props.settings.sub_hash_token;
+      const target = props.selectedTarget;
+      const params = new URLSearchParams();
+      params.append('target', target);
+      if (customName.value && customName.value.trim()) {
+        params.append('name', customName.value.trim());
+      }
+      const queryStr = params.toString();
+      if (token) {
+        return `${origin}/c/${token}?${queryStr}`;
+      }
+      return `${origin}/feed?${queryStr}`;
+    });
+
+    const formatExt = computed(() => {
+      if (props.selectedTarget === 'sing-box') return 'JSON (Sing-box)';
+      if (props.selectedTarget === 'base64') return 'TXT (Base64)';
+      return 'YAML (Mihomo)';
+    });
+
+    const clashSchemeUrl = computed(() => {
+      return `clash://install-config?url=${encodeURIComponent(activeSubscriptionUrl.value)}&name=${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
+    });
+
+    const singboxSchemeUrl = computed(() => {
+      return `sing-box://import-remote-profile?url=${encodeURIComponent(activeSubscriptionUrl.value)}#${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
+    });
+
+    const renderQrCode = () => {
+      nextTick(() => {
+        const container = document.getElementById('qrcode-container-box');
+        if (!container) return;
+        container.innerHTML = '';
+        if (window.QRCode) {
+          new window.QRCode(container, {
+            text: activeSubscriptionUrl.value,
+            width: 170,
+            height: 170,
+            colorDark: "#0f172a",
+            colorLight: "#ffffff",
+            correctLevel: window.QRCode.CorrectLevel.M
+          });
+        }
+      });
+    };
+
+    const toggleQr = () => {
+      showQr.value = !showQr.value;
+      if (showQr.value) renderQrCode();
+    };
+
+    const onMouseEnterQr = () => {
+      clearTimeout(hoverTimeout);
+      showQr.value = true;
+      renderQrCode();
+    };
+
+    const onMouseLeaveQr = () => {
+      hoverTimeout = setTimeout(() => {
+        showQr.value = false;
+      }, 300);
+    };
+
+    watch(activeSubscriptionUrl, () => {
+      if (showQr.value) renderQrCode();
+    });
+
+    const copySubscriptionUrl = () => {
+      navigator.clipboard.writeText(activeSubscriptionUrl.value);
+      copied.value = true;
+      setTimeout(() => { copied.value = false; }, 2500);
+    };
+
+    const setTarget = (t) => {
+      emit('update:selectedTarget', t);
+    };
+
+    return {
+      copied,
+      showQr,
+      customName,
+      onNameChange,
+      defaultPlaceholder,
+      activeSubscriptionUrl,
+      formatExt,
+      clashSchemeUrl,
+      singboxSchemeUrl,
+      toggleQr,
+      onMouseEnterQr,
+      onMouseLeaveQr,
+      copySubscriptionUrl,
+      setTarget
+    };
+  }
 };
+</script>

@@ -1,20 +1,24 @@
 import asyncio
-from datetime import datetime
+import logging
 import re
 import time
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from .db import AsyncSessionLocal
 from .models import Node, Source
 from .parsers.clash import detect_country, is_residential_node, parse_clash_yaml
 from .parsers.uri import parse_subscription_text
 
 DEFAULT_UA = "clash.meta/v1.19.29"
+logger = logging.getLogger(__name__)
 
-def parse_userinfo_header(header_val: str) -> Dict[str, Optional[int]]:
-    info: Dict[str, Optional[int]] = {
+def parse_userinfo_header(header_val: str) -> dict[str, int | None]:
+    info: dict[str, int | None] = {
         "upload": 0,
         "download": 0,
         "total": 0,
@@ -39,7 +43,7 @@ def clean_node_name(name: str) -> str:
     cleaned = re.sub(r"\s+", " ", name).strip()
     return cleaned
 
-def extract_source_code(source_name: str, explicit_code: Optional[str] = None) -> str:
+def extract_source_code(source_name: str, explicit_code: str | None = None) -> str:
     if explicit_code and explicit_code.strip():
         return explicit_code.strip().upper()[:4]
     letters = re.findall(r'[A-Za-z]', source_name or "")
@@ -83,7 +87,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
     await session.commit()
 
     content = ""
-    raw_nodes: List[Dict[str, Any]] = []
+    raw_nodes: list[dict[str, Any]] = []
 
     try:
         if source.source_type == "local_yaml" or source.url.startswith("local://"):
@@ -104,7 +108,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
                     source.traffic_used = upload + download
                     source.traffic_total = uinfo.get("total") or 0
                     if uinfo.get("expire"):
-                        source.expire_at = datetime.fromtimestamp(uinfo["expire"])
+                        source.expire_at = datetime.fromtimestamp(uinfo["expire"], UTC)
 
         # Try Clash YAML first
         raw_nodes = parse_clash_yaml(content)
@@ -146,7 +150,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
         source.status = "healthy"
         source.error_message = None
         source.node_count = len(raw_nodes)
-        source.last_sync_at = datetime.utcnow()
+        source.last_sync_at = datetime.now(UTC)
         source.raw_content = content
         await session.commit()
         return True
@@ -154,7 +158,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
     except Exception as e:
         source.status = "error"
         source.error_message = str(e)
-        source.last_sync_at = datetime.utcnow()
+        source.last_sync_at = datetime.now(UTC)
         await session.commit()
         return False
 
@@ -166,22 +170,23 @@ async def sync_all_sources():
         for sid in source_ids:
             try:
                 await sync_single_source(sid, session)
-            except Exception:
-                pass
+            except Exception as exc:
+                await session.rollback()
+                logger.warning("Source synchronization failed (source_id=%s, error=%s)", sid, type(exc).__name__)
 
 async def background_sync_worker():
     while True:
         try:
             await sync_all_sources()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Background synchronization failed (error=%s)", type(exc).__name__)
         # Refresh every 30 minutes
         await asyncio.sleep(1800)
 
 
 # ==================== 后端定时巡检与延迟测速工作者 ====================
 
-async def ping_single_node(host: str, port: int, node_type: str, timeout: float = 2.5) -> Dict[str, Any]:
+async def ping_single_node(host: str, port: int, node_type: str, timeout: float = 2.5) -> dict[str, Any]:
     t0 = time.perf_counter()
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
@@ -189,15 +194,15 @@ async def ping_single_node(host: str, port: int, node_type: str, timeout: float 
         writer.close()
         try:
             await writer.wait_closed()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Connection close failed (error=%s)", type(exc).__name__)
         return {"latency": round(rtt, 1), "status": "ok", "error": None}
     except ConnectionRefusedError:
         rtt = (time.perf_counter() - t0) * 1000.0
         if node_type == "hysteria2":
             return {"latency": round(rtt, 1), "status": "ok", "error": None}
         return {"latency": round(rtt, 1), "status": "refused", "error": "Connection refused"}
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"latency": None, "status": "timeout", "error": "Connection timed out"}
     except Exception as e:
         return {"latency": None, "status": "error", "error": str(e)}
@@ -217,7 +222,7 @@ async def ping_all_nodes(timeout: float = 2.5, concurrency: int = 20):
                 res = await ping_single_node(node.server, node.port, node.node_type, timeout=timeout)
                 node.latency = res["latency"]
                 node.latency_status = res["status"]
-                node.latency_updated_at = datetime.utcnow()
+                node.latency_updated_at = datetime.now(UTC)
 
         await asyncio.gather(*(worker(n) for n in nodes))
         await session.commit()
@@ -228,6 +233,6 @@ async def background_ping_worker():
     while True:
         try:
             await ping_all_nodes()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Background latency check failed (error=%s)", type(exc).__name__)
         await asyncio.sleep(300)

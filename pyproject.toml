@@ -1,24 +1,26 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sub-egress"
-version = "0.3.6"
+version = "0.4.0"
 description = "Modern outbound gateway and multi-core subscription aggregation hub with binary selector design"
 readme = "README.md"
-requires-python = ">=3.11"
-license = { text = "MIT" }
+requires-python = ">=3.14"
+license = "MIT"
 authors = [
     { name = "yunyingk" }
 ]
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi==0.161.1",
     "uvicorn[standard]>=0.32.0",
-    "sqlalchemy>=2.0.36",
+    "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30.0",
     "aiosqlite>=0.20.0",
     "httpx>=0.28.0",
+    "certifi>=2026.10.19",
+    "opentelemetry-api>=1.45.1",
     "pyyaml>=6.0.2",
     "pydantic>=2.10.0",
     "python-multipart>=0.0.12",
@@ -34,4 +36,19 @@ dev = [
 ]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "FAST", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["app*"]
+
+[tool.uv]
+# Initial dependency snapshot: at least three months old, except approved or security-fixed packages.
+exclude-newer = "2026-08-10T00:00:00+08:00"
+exclude-newer-package = { fastapi = "2026-11-10T00:00:00+08:00", ruff = "2026-11-10T00:00:00+08:00", certifi = "2026-11-10T00:00:00+08:00", opentelemetry-api = "2026-11-10T00:00:00+08:00" }

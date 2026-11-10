@@ -1,8 +1,9 @@
 import base64
 import copy
 import json
-from typing import Any, Dict, List
 import urllib.parse
+from typing import Any
+
 import yaml
 
 DEFAULT_DNS_CONFIG = {
@@ -118,7 +119,7 @@ DYNAMIC_REGIONS = [
 ]
 
 
-def sort_residential_nodes(names: List[str]) -> List[str]:
+def sort_residential_nodes(names: list[str]) -> list[str]:
     """
     家宽住宅主备优先排序：
     1. 协议优先：AnyTLS (' A ' 或 'AnyTLS') 作为第一顺位主选，优于 VLESS (' V ')
@@ -131,7 +132,7 @@ def sort_residential_nodes(names: List[str]) -> List[str]:
     return sorted(names, key=key_fn)
 
 
-def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     根据接入的可用物理节点，自动计算带边界的聚合动态策略组 (URL-Test / Fallback)。
     既用于下发配置文件生成，也用于提供给 Web 仪表盘清晰展示。
@@ -140,8 +141,8 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
         return []
 
     pass_through_names = [item.get("display_name") or item.get("name") for item in raw_nodes if (item.get("display_name") or item.get("name"))]
-    by_country: Dict[str, List[str]] = {}
-    residential_names: List[str] = []
+    by_country: dict[str, list[str]] = {}
+    residential_names: list[str] = []
 
     for item in raw_nodes:
         name = item.get("display_name") or item.get("name")
@@ -205,12 +206,12 @@ def extract_dynamic_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, An
     return groups
 
 
-def extract_source_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def extract_source_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     按供应商（根据节点前缀 [XX]）聚合生成供应商专属策略组。
     """
     import re
-    by_source: Dict[str, List[str]] = {}
+    by_source: dict[str, list[str]] = {}
     for item in raw_nodes:
         name = item.get("display_name") or item.get("name")
         if not name:
@@ -250,13 +251,13 @@ def extract_source_groups(raw_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any
 
 
 def build_clash_config(
-    raw_nodes: List[Dict[str, Any]],
+    raw_nodes: list[dict[str, Any]],
     mixed_port: int = 7897,
     terminal_port: int = 7898,
-    custom_direct_domains: List[str] = None,
-    custom_proxy_domains: List[str] = None,
-    custom_rules: List[str] = None,
-    custom_nameserver_policy: Dict[str, Any] = None
+    custom_direct_domains: list[str] = None,
+    custom_proxy_domains: list[str] = None,
+    custom_rules: list[str] = None,
+    custom_nameserver_policy: dict[str, Any] = None
 ) -> str:
     """
     Builds a clean, production-grade Mihomo / ClashMeta YAML configuration with:
@@ -284,8 +285,8 @@ def build_clash_config(
         }
         return yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
 
-    proxies_list: List[Dict[str, Any]] = []
-    pass_through_names: List[str] = []
+    proxies_list: list[dict[str, Any]] = []
+    pass_through_names: list[str] = []
 
     for item in raw_nodes:
         if "config_json" in item and isinstance(item["config_json"], dict):
@@ -430,14 +431,16 @@ def build_clash_config(
 
 
 def build_singbox_config(
-    raw_nodes: List[Dict[str, Any]],
-    custom_direct_domains: List[str] = None
+    raw_nodes: list[dict[str, Any]],
+    custom_direct_domains: list[str] = None,
+    custom_proxy_domains: list[str] = None,
+    custom_rules: list[str] = None,
 ) -> str:
     """
     Builds a complete, modern Sing-box JSON configuration with single-selector control.
     """
-    outbounds: List[Dict[str, Any]] = []
-    pass_through_tags: List[str] = []
+    outbounds: list[dict[str, Any]] = []
+    pass_through_tags: list[str] = []
 
     for item in raw_nodes:
         s = copy.deepcopy(item.get("config_json", {}))
@@ -477,7 +480,7 @@ def build_singbox_config(
                 "flow": s.get("flow") or ""
             }
             if s.get("tls"):
-                tls_cfg: Dict[str, Any] = {
+                tls_cfg: dict[str, Any] = {
                     "enabled": True,
                     "server_name": s.get("servername") or s.get("server"),
                     "insecure": bool(s.get("skip-cert-verify", False))
@@ -512,8 +515,8 @@ def build_singbox_config(
 
     # 动态组 (使用统一的 extract_dynamic_groups)
     dyn_groups = extract_dynamic_groups(raw_nodes)
-    group_outbounds: List[Dict[str, Any]] = []
-    dyn_tags: List[str] = []
+    group_outbounds: list[dict[str, Any]] = []
+    dyn_tags: list[str] = []
 
     for g in dyn_groups:
         dyn_tags.append(g["name"])
@@ -541,6 +544,24 @@ def build_singbox_config(
     ]
 
     all_outbounds = [proxy_selector, *group_outbounds, *outbounds, *system_outbounds]
+
+    route_rules: list[dict[str, Any]] = [{"protocol": "dns", "outbound": "dns-out"}, {"geoip": "private", "outbound": "direct"}]
+    if custom_direct_domains:
+        domains = [domain.strip() for domain in custom_direct_domains if domain.strip()]
+        if domains:
+            route_rules.append({"domain_suffix": domains, "outbound": "direct"})
+    if custom_proxy_domains:
+        domains = [domain.strip() for domain in custom_proxy_domains if domain.strip()]
+        if domains:
+            route_rules.append({"domain_suffix": domains, "outbound": "PROXY"})
+    type_map = {"DOMAIN": "domain", "DOMAIN-SUFFIX": "domain_suffix", "DOMAIN-KEYWORD": "domain_keyword", "IP-CIDR": "ip_cidr", "IP-CIDR6": "ip_cidr", "GEOIP": "geoip", "GEOSITE": "geosite"}
+    for raw_rule in custom_rules or []:
+        parts = [part.strip() for part in raw_rule.split(",")]
+        if len(parts) < 3 or parts[0].upper() not in type_map:
+            continue
+        rule_type, value, target = parts[0].upper(), parts[1], parts[2]
+        outbound = {"DIRECT": "direct", "REJECT": "block", "PROXY": "PROXY", "__MAIN_PROXY__": "PROXY"}.get(target.upper(), target)
+        route_rules.append({type_map[rule_type]: [value], "outbound": outbound})
 
     singbox_config = {
         "log": {
@@ -581,13 +602,7 @@ def build_singbox_config(
         "outbounds": all_outbounds,
         "route": {
             "rules": [
-                {"protocol": "dns", "outbound": "dns-out"},
-                {"geoip": "private", "outbound": "direct"},
-                *(
-                    [{"domain_suffix": [d.strip() for d in custom_direct_domains if d.strip()], "outbound": "direct"}]
-                    if custom_direct_domains and any(d.strip() for d in custom_direct_domains)
-                    else []
-                ),
+                *route_rules,
                 {"geoip": "cn", "outbound": "direct"},
                 {"geosite": "cn", "outbound": "direct"}
             ],
@@ -599,11 +614,11 @@ def build_singbox_config(
     return json.dumps(singbox_config, ensure_ascii=False, indent=2)
 
 
-def build_base64_config(raw_nodes: List[Dict[str, Any]]) -> str:
+def build_base64_config(raw_nodes: list[dict[str, Any]]) -> str:
     """
     Builds a standard Base64 URI subscription containing all valid node links.
     """
-    uris: List[str] = []
+    uris: list[str] = []
     for item in raw_nodes:
         s = item.get("config_json", {})
         tag = item.get("display_name", "")

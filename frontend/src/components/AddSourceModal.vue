@@ -1,27 +1,4 @@
-import { ref } from 'vue';
-
-export default {
-  name: 'AddSourceModal',
-  props: {
-    visible: { type: Boolean, default: false },
-    creating: { type: Boolean, default: false }
-  },
-  emits: ['close', 'create'],
-  setup(props, { emit }) {
-    const form = ref({ name: '', url: '' });
-
-    const handleCreate = () => {
-      if (!form.value.name.trim() || !form.value.url.trim()) return;
-      emit('create', { name: form.value.name.trim(), url: form.value.url.trim() });
-      form.value = { name: '', url: '' };
-    };
-
-    return {
-      form,
-      handleCreate
-    };
-  },
-  template: `
+<template>
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl max-w-md w-full p-6 space-y-5">
         <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
@@ -56,5 +33,32 @@ export default {
         </div>
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import { ref } from 'vue';
+
+export default {
+  name: 'AddSourceModal',
+  props: {
+    visible: { type: Boolean, default: false },
+    creating: { type: Boolean, default: false }
+  },
+  emits: ['close', 'create'],
+  setup(props, { emit }) {
+    const form = ref({ name: '', url: '' });
+
+    const handleCreate = () => {
+      if (!form.value.name.trim() || !form.value.url.trim()) return;
+      emit('create', { name: form.value.name.trim(), url: form.value.url.trim() });
+      form.value = { name: '', url: '' };
+    };
+
+    return {
+      form,
+      handleCreate
+    };
+  }
 };
+</script>

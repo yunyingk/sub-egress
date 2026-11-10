@@ -1,7 +1,9 @@
 import base64
-from typing import Any, Dict, List
 import urllib.parse
+from typing import Any
+
 from .clash import is_ad_node
+
 
 def safe_b64decode(s: str) -> str:
     s = s.strip().replace(" ", "").replace("\n", "").replace("\r", "")
@@ -16,7 +18,7 @@ def safe_b64decode(s: str) -> str:
         except Exception:
             return ""
 
-def parse_ss(url: str) -> Dict[str, Any] | None:
+def parse_ss(url: str) -> dict[str, Any] | None:
     try:
         parsed = urllib.parse.urlparse(url)
         name = urllib.parse.unquote(parsed.fragment) or "Shadowsocks"
@@ -51,7 +53,7 @@ def parse_ss(url: str) -> Dict[str, Any] | None:
     except Exception:
         return None
 
-def parse_vless(url: str) -> Dict[str, Any] | None:
+def parse_vless(url: str) -> dict[str, Any] | None:
     try:
         parsed = urllib.parse.urlparse(url)
         uuid = parsed.username or parsed.netloc.split("@")[0]
@@ -69,7 +71,7 @@ def parse_vless(url: str) -> Dict[str, Any] | None:
         sid = qs.get("sid", [None])[0]
         fp = qs.get("fp", ["chrome"])[0]
 
-        proxy: Dict[str, Any] = {
+        proxy: dict[str, Any] = {
             "name": name,
             "type": "vless",
             "server": server,
@@ -94,7 +96,7 @@ def parse_vless(url: str) -> Dict[str, Any] | None:
     except Exception:
         return None
 
-def parse_trojan(url: str) -> Dict[str, Any] | None:
+def parse_trojan(url: str) -> dict[str, Any] | None:
     try:
         parsed = urllib.parse.urlparse(url)
         password = parsed.username or parsed.netloc.split("@")[0]
@@ -117,7 +119,7 @@ def parse_trojan(url: str) -> Dict[str, Any] | None:
     except Exception:
         return None
 
-def parse_hysteria2(url: str) -> Dict[str, Any] | None:
+def parse_hysteria2(url: str) -> dict[str, Any] | None:
     try:
         parsed = urllib.parse.urlparse(url)
         password = parsed.username or parsed.netloc.split("@")[0]
@@ -140,7 +142,7 @@ def parse_hysteria2(url: str) -> Dict[str, Any] | None:
     except Exception:
         return None
 
-def parse_uri(line: str) -> Dict[str, Any] | None:
+def parse_uri(line: str) -> dict[str, Any] | None:
     line = line.strip()
     if not line:
         return None
@@ -154,7 +156,7 @@ def parse_uri(line: str) -> Dict[str, Any] | None:
         return parse_hysteria2(line)
     return None
 
-def parse_subscription_text(text: str) -> List[Dict[str, Any]]:
+def parse_subscription_text(text: str) -> list[dict[str, Any]]:
     # Attempt base64 decode if lines look like base64 blob
     decoded = safe_b64decode(text)
     content = decoded if decoded and ("vmess://" in decoded or "vless://" in decoded or "ss://" in decoded or "trojan://" in decoded) else text

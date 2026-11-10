@@ -1,21 +1,34 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.14-slim
+ARG NODE_IMAGE=node:24.12.0-slim
+FROM ${NODE_IMAGE} AS frontend-build
+WORKDIR /frontend-src
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+COPY pyproject.toml /pyproject.toml
+RUN npm run build
+
+FROM ${PYTHON_IMAGE}
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.12 /uv /uvx /bin/
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
     DATA_DIR=/data \
     FRONTEND_DIR=/frontend
 
 RUN mkdir -p /data /frontend
 
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
 
-COPY pyproject.toml ./pyproject.toml
 COPY backend/app ./app
-COPY frontend /frontend
+COPY --from=frontend-build /frontend-src/dist /frontend
 
 VOLUME ["/data"]
 EXPOSE 8000

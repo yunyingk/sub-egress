@@ -1,8 +1,10 @@
 import os
-from pathlib import Path
 import secrets
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from pathlib import Path
+
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from .models import Base, Setting, User
 from .security import generate_secure_password, hash_password, validate_password
 
@@ -35,9 +37,17 @@ async def init_db():
         
         # 兼容已有数据库结构，平滑增补字段
         if not DATABASE_URL.startswith("sqlite"):
+            old_timestamps = await conn.execute(text("""
+                SELECT table_name, column_name FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name IN ('users', 'passkey_credentials', 'sources', 'nodes', 'settings')
+                  AND data_type = 'timestamp without time zone'
+            """))
+            if old_timestamps.first():
+                raise RuntimeError("Database timestamps require UTC migration before startup; see documentation")
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency DOUBLE PRECISION;"))
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_status VARCHAR(32);"))
-            await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_updated_at TIMESTAMP;"))
+            await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_updated_at TIMESTAMP WITH TIME ZONE;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS code VARCHAR(8);"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS user_id INTEGER;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_shared BOOLEAN DEFAULT TRUE;"))
@@ -73,8 +83,8 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE users ADD COLUMN custom_proxy_domains TEXT DEFAULT '';"))
                 if "custom_rules" not in u_cols:
                     await conn.execute(text("ALTER TABLE users ADD COLUMN custom_rules TEXT DEFAULT '';"))
-            except Exception:
-                pass
+            except Exception as exc:
+                raise RuntimeError("SQLite schema initialization failed") from exc
 
     # 管理员初始化与忘记密码检查
     async with AsyncSessionLocal() as session:

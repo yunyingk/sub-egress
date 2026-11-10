@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-10
+
+### Changed
+- **Python and Dependencies**: Require Python 3.14 or later and use a reproducible uv lockfile, with an exported pip requirements file.
+- **Passkey Verification**: Require an explicitly configured origin and verify origin, RP ID, credential identifiers, user presence and signature counters. Existing deployments must review passkey counters and configure `WEBAUTHN_ORIGIN` before upgrading.
+- **UTC Timestamps**: Use timezone-aware UTC values. Existing PostgreSQL deployments must follow the UTC migration instructions before starting this version.
+- **Frontend**: Pin Vue to 3.5.39.
+
+### Fixed
+- **Package Build**: Configure Python package discovery and modern license metadata.
+- **Kubernetes Example**: Remove the hard-coded database connection from the deployment manifest.
+
 ## [0.3.6] - 2026-11-10
 
 ### Fixed

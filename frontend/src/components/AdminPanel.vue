@@ -1,197 +1,6 @@
-import { ref, reactive, onMounted } from 'vue';
-
-export default {
-  name: 'AdminPanel',
-  props: {
-    visible: { type: Boolean, default: false },
-    currentAdmin: { type: Object, default: () => ({}) }
-  },
-  emits: ['close'],
-  setup(props, { emit }) {
-    const users = ref([]);
-    const loading = ref(false);
-    const errorMessage = ref('');
-    const successMessage = ref('');
-
-    // 重置密码弹窗状态
-    const showResetModal = ref(false);
-    const targetUser = ref(null);
-    const newPasswordInput = ref('');
-    const resetLoading = ref(false);
-    const resetResultPassword = ref('');
-
-    // 加载用户列表
-    const fetchUsers = async () => {
-      loading.value = true;
-      errorMessage.value = '';
-      try {
-        const res = await fetch('/api/admin/users');
-        if (res.ok) {
-          users.value = await res.json();
-        } else {
-          const err = await res.json();
-          errorMessage.value = err.detail || '获取用户列表失败';
-        }
-      } catch (e) {
-        errorMessage.value = '请求失败，请稍后重试';
-      } finally {
-        loading.value = false;
-      }
-    };
-
-    // 激活用户
-    const activateUser = async (user) => {
-      try {
-        const res = await fetch(`/api/admin/users/${user.id}/activate`, { method: 'POST' });
-        if (res.ok) {
-          user.is_active = true;
-          successMessage.value = `用户 ${user.username} 已激活`;
-        }
-      } catch (e) {
-        errorMessage.value = '激活失败';
-      }
-    };
-
-    // 禁用用户
-    const deactivateUser = async (user) => {
-      if (user.id === props.currentAdmin.id) {
-        alert('管理员不能禁用自身账号！');
-        return;
-      }
-      if (!confirm(`确定要禁用用户 ${user.username} 吗？禁用后该用户将无法登录且无法获取订阅。`)) return;
-      try {
-        const res = await fetch(`/api/admin/users/${user.id}/deactivate`, { method: 'POST' });
-        if (res.ok) {
-          user.is_active = false;
-          successMessage.value = `用户 ${user.username} 已禁用`;
-        }
-      } catch (e) {
-        errorMessage.value = '禁用失败';
-      }
-    };
-
-    // 打开重置密码弹窗
-    const openResetPasswordModal = (user) => {
-      if (user.id === props.currentAdmin.id) {
-        alert('管理员不能在管理页面重置自身的密码！若需修改自身密码请使用个人安全中心，若遗忘密码请通过服务器重启配置 RESET_ADMIN_PASSWORD 重设。');
-        return;
-      }
-      targetUser.value = user;
-      newPasswordInput.value = '';
-      resetResultPassword.value = '';
-      showResetModal.value = true;
-    };
-
-    // 生成随机合规密码
-    const generatePasswordForReset = () => {
-      const lowers = 'abcdefghijklmnopqrstuvwxyz';
-      const digits = '0123456789';
-      const symbols = '!@#%&*+-=._';
-      const all = lowers + digits + symbols;
-      let pwd = [
-        lowers[Math.floor(Math.random() * lowers.length)],
-        digits[Math.floor(Math.random() * digits.length)],
-        symbols[Math.floor(Math.random() * symbols.length)]
-      ];
-      for (let i = 3; i < 32; i++) {
-        pwd.push(all[Math.floor(Math.random() * all.length)]);
-      }
-      pwd.sort(() => Math.random() - 0.5);
-      newPasswordInput.value = pwd.join('');
-    };
-
-    // 执行重置用户密码
-    const executeResetPassword = async () => {
-      if (!targetUser.value) return;
-      if (newPasswordInput.value && /[A-Z]/.test(newPasswordInput.value)) {
-        alert('密码严禁包含大写字母！请使用小写字母、数字和符号。');
-        return;
-      }
-
-      resetLoading.value = true;
-      try {
-        const res = await fetch(`/api/admin/users/${targetUser.value.id}/reset-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ new_password: newPasswordInput.value || null })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          resetResultPassword.value = data.new_password;
-          successMessage.value = `用户 ${targetUser.value.username} 的密码重置成功！`;
-        } else {
-          alert(data.detail || '重置密码失败');
-        }
-      } catch (e) {
-        alert('网络异常，请重试');
-      } finally {
-        resetLoading.value = false;
-      }
-    };
-
-    // 解绑指定通行密钥
-    const unbindPasskey = async (userId, passkeyId) => {
-      if (!confirm('确定要为该用户解绑此通行密钥吗？')) return;
-      try {
-        const res = await fetch(`/api/admin/users/${userId}/passkeys/${passkeyId}`, { method: 'DELETE' });
-        if (res.ok) {
-          await fetchUsers();
-          successMessage.value = '通行密钥解绑成功';
-        }
-      } catch (e) {
-        errorMessage.value = '解绑失败';
-      }
-    };
-
-    // 解绑第三方授权
-    const unbindOAuth = async (user) => {
-      if (!confirm(`确定要解除用户 ${user.username} 的第三方 (${user.oauth_provider || 'Authentik'}) 绑定吗？`)) return;
-      try {
-        const res = await fetch(`/api/admin/users/${user.id}/unbind-oauth`, { method: 'POST' });
-        if (res.ok) {
-          user.oauth_provider = null;
-          successMessage.value = `用户 ${user.username} 的第三方绑定已解除`;
-        }
-      } catch (e) {
-        errorMessage.value = '解除绑定失败';
-      }
-    };
-
-    const copyText = (txt) => {
-      navigator.clipboard.writeText(txt);
-      alert('已复制到剪贴板！');
-    };
-
-    onMounted(() => {
-      fetchUsers();
-    });
-
-    return {
-      users,
-      loading,
-      errorMessage,
-      successMessage,
-      showResetModal,
-      targetUser,
-      newPasswordInput,
-      resetLoading,
-      resetResultPassword,
-      fetchUsers,
-      activateUser,
-      deactivateUser,
-      openResetPasswordModal,
-      generatePasswordForReset,
-      executeResetPassword,
-      unbindPasskey,
-      unbindOAuth,
-      copyText
-    };
-  },
-  template: `
-    <div v-if="visible" class="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
-      <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" @click="$emit('close')"></div>
-
-      <div class="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 max-w-5xl w-full p-6 md:p-8 z-10 max-h-[90vh] flex flex-col">
+<template>
+    <div v-if="visible" class="max-w-7xl mx-auto px-4 py-8">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full p-6 md:p-8 min-h-[70vh] flex flex-col">
         <!-- 弹窗标题 -->
         <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-700 shrink-0 mb-4">
           <div class="flex items-center gap-3">
@@ -204,6 +13,8 @@ export default {
             </div>
           </div>
           <div class="flex items-center gap-2">
+            <a href="/admin/users" class="px-3 py-1.5 text-xs rounded-lg border">用户管理</a>
+            <a href="/admin/rules" class="px-3 py-1.5 text-xs rounded-lg border">全局规则</a>
             <button @click="fetchUsers" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1.5">
               <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': loading}"></i>刷新
             </button>
@@ -222,6 +33,12 @@ export default {
           <i class="fa-solid fa-circle-check shrink-0"></i>
           <span>{{ successMessage }}</span>
         </div>
+
+        <form class="flex flex-wrap gap-2" @submit.prevent="createUser">
+          <input v-model="newUsername" required minlength="5" maxlength="20" pattern="[a-z0-9_-]+" placeholder="新用户名（5–20位小写）" class="flex-1 min-w-48 rounded-lg border px-3 py-2 text-sm dark:bg-slate-900">
+          <input v-model="newUserPassword" minlength="20" maxlength="260" placeholder="初始密码（留空自动生成）" class="flex-1 min-w-48 rounded-lg border px-3 py-2 text-sm dark:bg-slate-900">
+          <button class="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm">创建用户</button>
+        </form>
 
         <!-- 用户列表表格 (自适应滚动) -->
         <div class="flex-1 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl">
@@ -382,5 +199,214 @@ export default {
         </div>
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import { ref, reactive, onMounted } from 'vue';
+
+export default {
+  name: 'AdminPanel',
+  props: {
+    visible: { type: Boolean, default: false },
+    currentAdmin: { type: Object, default: () => ({}) }
+  },
+  emits: ['close'],
+  setup(props, { emit }) {
+    const users = ref([]);
+    const loading = ref(false);
+    const errorMessage = ref('');
+    const successMessage = ref('');
+    const newUsername = ref('');
+    const newUserPassword = ref('');
+
+    const createUser = async () => {
+      try {
+        const response = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: newUsername.value, password: newUserPassword.value || null }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || '创建失败');
+        successMessage.value = `用户 ${data.username} 已创建，初始密码：${data.initial_password}`;
+        newUsername.value = ''; newUserPassword.value = '';
+        await fetchUsers();
+      } catch (error) { errorMessage.value = error.message; }
+    };
+
+    // 重置密码弹窗状态
+    const showResetModal = ref(false);
+    const targetUser = ref(null);
+    const newPasswordInput = ref('');
+    const resetLoading = ref(false);
+    const resetResultPassword = ref('');
+
+    // 加载用户列表
+    const fetchUsers = async () => {
+      loading.value = true;
+      errorMessage.value = '';
+      try {
+        const res = await fetch('/api/admin/users');
+        if (res.ok) {
+          users.value = await res.json();
+        } else {
+          const err = await res.json();
+          errorMessage.value = err.detail || '获取用户列表失败';
+        }
+      } catch (e) {
+        errorMessage.value = '请求失败，请稍后重试';
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    // 激活用户
+    const activateUser = async (user) => {
+      try {
+        const res = await fetch(`/api/admin/users/${user.id}/activate`, { method: 'POST' });
+        if (res.ok) {
+          user.is_active = true;
+          successMessage.value = `用户 ${user.username} 已激活`;
+        }
+      } catch (e) {
+        errorMessage.value = '激活失败';
+      }
+    };
+
+    // 禁用用户
+    const deactivateUser = async (user) => {
+      if (user.id === props.currentAdmin.id) {
+        alert('管理员不能禁用自身账号！');
+        return;
+      }
+      if (!confirm(`确定要禁用用户 ${user.username} 吗？禁用后该用户将无法登录且无法获取订阅。`)) return;
+      try {
+        const res = await fetch(`/api/admin/users/${user.id}/deactivate`, { method: 'POST' });
+        if (res.ok) {
+          user.is_active = false;
+          successMessage.value = `用户 ${user.username} 已禁用`;
+        }
+      } catch (e) {
+        errorMessage.value = '禁用失败';
+      }
+    };
+
+    // 打开重置密码弹窗
+    const openResetPasswordModal = (user) => {
+      if (user.id === props.currentAdmin.id) {
+        alert('管理员不能在管理页面重置自身的密码！若需修改自身密码请使用个人安全中心，若遗忘密码请通过服务器重启配置 RESET_ADMIN_PASSWORD 重设。');
+        return;
+      }
+      targetUser.value = user;
+      newPasswordInput.value = '';
+      resetResultPassword.value = '';
+      showResetModal.value = true;
+    };
+
+    // 生成随机合规密码
+    const generatePasswordForReset = () => {
+      const lowers = 'abcdefghijklmnopqrstuvwxyz';
+      const digits = '0123456789';
+      const symbols = '!@#%&*+-=._';
+      const all = lowers + digits + symbols;
+      let pwd = [
+        lowers[Math.floor(Math.random() * lowers.length)],
+        digits[Math.floor(Math.random() * digits.length)],
+        symbols[Math.floor(Math.random() * symbols.length)]
+      ];
+      for (let i = 3; i < 32; i++) {
+        pwd.push(all[Math.floor(Math.random() * all.length)]);
+      }
+      pwd.sort(() => Math.random() - 0.5);
+      newPasswordInput.value = pwd.join('');
+    };
+
+    // 执行重置用户密码
+    const executeResetPassword = async () => {
+      if (!targetUser.value) return;
+      if (newPasswordInput.value && /[A-Z]/.test(newPasswordInput.value)) {
+        alert('密码严禁包含大写字母！请使用小写字母、数字和符号。');
+        return;
+      }
+
+      resetLoading.value = true;
+      try {
+        const res = await fetch(`/api/admin/users/${targetUser.value.id}/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_password: newPasswordInput.value || null })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          resetResultPassword.value = data.new_password;
+          successMessage.value = `用户 ${targetUser.value.username} 的密码重置成功！`;
+        } else {
+          alert(data.detail || '重置密码失败');
+        }
+      } catch (e) {
+        alert('网络异常，请重试');
+      } finally {
+        resetLoading.value = false;
+      }
+    };
+
+    // 解绑指定通行密钥
+    const unbindPasskey = async (userId, passkeyId) => {
+      if (!confirm('确定要为该用户解绑此通行密钥吗？')) return;
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/passkeys/${passkeyId}`, { method: 'DELETE' });
+        if (res.ok) {
+          await fetchUsers();
+          successMessage.value = '通行密钥解绑成功';
+        }
+      } catch (e) {
+        errorMessage.value = '解绑失败';
+      }
+    };
+
+    // 解绑第三方授权
+    const unbindOAuth = async (user) => {
+      if (!confirm(`确定要解除用户 ${user.username} 的第三方 (${user.oauth_provider || 'Authentik'}) 绑定吗？`)) return;
+      try {
+        const res = await fetch(`/api/admin/users/${user.id}/unbind-oauth`, { method: 'POST' });
+        if (res.ok) {
+          user.oauth_provider = null;
+          successMessage.value = `用户 ${user.username} 的第三方绑定已解除`;
+        }
+      } catch (e) {
+        errorMessage.value = '解除绑定失败';
+      }
+    };
+
+    const copyText = (txt) => {
+      navigator.clipboard.writeText(txt);
+      alert('已复制到剪贴板！');
+    };
+
+    onMounted(() => {
+      fetchUsers();
+    });
+
+    return {
+      users,
+      newUsername,
+      newUserPassword,
+      createUser,
+      loading,
+      errorMessage,
+      successMessage,
+      showResetModal,
+      targetUser,
+      newPasswordInput,
+      resetLoading,
+      resetResultPassword,
+      fetchUsers,
+      activateUser,
+      deactivateUser,
+      openResetPasswordModal,
+      generatePasswordForReset,
+      executeResetPassword,
+      unbindPasskey,
+      unbindOAuth,
+      copyText
+    };
+  }
 };
+</script>

@@ -1,13 +1,4 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sub-egress-secret
-  namespace: infra
-type: Opaque
-stringData:
-  # Replace with your PostgreSQL connection string, or omit DATABASE_URL to use SQLite
-  DATABASE_URL: "postgresql+asyncpg://dev:0317b6aca410fc390d59ee3a7eb220903c7f33f5aec71574@shared-postgres18.infra.svc.cluster.local:5432/sub_egress"
----
+# Configure the PostgreSQL connection using k8s/secret.example.yaml, or omit it to use SQLite.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,6 +24,29 @@ spec:
             - containerPort: 8000
               name: http
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sub-egress-session-secret
+                  key: SECRET_KEY
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: sub-egress-github-oauth
+                  key: GITHUB_CLIENT_ID
+                  optional: true
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sub-egress-github-oauth
+                  key: GITHUB_CLIENT_SECRET
+                  optional: true
+            - name: GITHUB_REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: sub-egress-github-oauth
+                  key: GITHUB_REDIRECT_URI
+                  optional: true
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -43,6 +57,7 @@ spec:
               value: "/frontend"
             - name: DATA_DIR
               value: "/data"
+            # Set WEBAUTHN_ORIGIN to the browser's exact HTTPS origin before enabling passkeys.
           volumeMounts:
             - name: data-volume
               mountPath: /data

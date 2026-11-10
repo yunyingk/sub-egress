@@ -7,14 +7,14 @@ import hashlib
 import json
 import secrets
 import time
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import cbor2
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 # Challenge 内存缓存 (TTL 5分钟)
-_CHALLENGES: Dict[str, Tuple[str, float]] = {}
+_CHALLENGES: dict[str, tuple[str, float]] = {}
 
 
 def _clean_expired_challenges():
@@ -58,12 +58,12 @@ def encode_b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
-def cose_key_to_pem(cose_key: Dict[int, Any]) -> str:
+def cose_key_to_pem(cose_key: dict[int, Any]) -> str:
     """将 COSE Key 转换为 PEM 格式存储"""
     key_type = cose_key.get(1)
     alg = cose_key.get(3)
 
-    if key_type == 2:  # EC2 (Elliptic Curve)
+    if key_type == 2 and alg == -7 and cose_key.get(-1) == 1:  # EC2 (Elliptic Curve)
         # alg -7 是 ES256 (P-256)
         x = cose_key.get(-2)
         y = cose_key.get(-3)
@@ -78,7 +78,7 @@ def cose_key_to_pem(cose_key: Dict[int, Any]) -> str:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode("utf-8")
 
-    elif key_type == 3:  # RSA
+    elif key_type == 3 and alg == -257:  # RSA
         # alg -257 是 RS256
         n = cose_key.get(-1)
         e = cose_key.get(-2)
@@ -101,7 +101,8 @@ def parse_and_verify_registration(
     attestation_obj_b64: str,
     expected_challenge: str,
     rp_id: str,
-) -> Dict[str, Any]:
+    expected_origin: str,
+) -> dict[str, Any]:
     """
     解析并验证 WebAuthn 注册凭证 (Attestation)
     返回:
@@ -119,32 +120,36 @@ def parse_and_verify_registration(
     if not secrets.compare_digest(client_data.get("challenge", ""), expected_challenge):
         raise ValueError("WebAuthn challenge mismatch")
 
+    if client_data.get("origin") != expected_origin or client_data.get("crossOrigin", False):
+        raise ValueError("WebAuthn origin mismatch")
+
     raw_attestation = decode_b64url(attestation_obj_b64)
     att_obj = cbor2.loads(raw_attestation)
     auth_data = att_obj.get("authData")
-    if not auth_data or len(auth_data) < 37:
+    if not isinstance(auth_data, bytes) or len(auth_data) < 55:
         raise ValueError("Invalid authData in attestationObject")
 
     # 1. 验证 RP ID Hash
     rp_id_hash = auth_data[0:32]
     expected_rp_hash = hashlib.sha256(rp_id.encode("utf-8")).digest()
     if not secrets.compare_digest(rp_id_hash, expected_rp_hash):
-        # 如果当前访问携带端口或子域名，允许兼容比对主域名
-        pass
+        raise ValueError("WebAuthn RP ID hash mismatch")
 
     # 2. 检查 Flags: AT (Attested credential data) 必须为 1
     flags = auth_data[32]
     up = bool(flags & 0x01)
     uv = bool(flags & 0x04)
     at = bool(flags & 0x40)
-    if not at:
-        raise ValueError("Attested credential data flag is not set")
+    if not up or not at:
+        raise ValueError("User presence or attested credential data flag is not set")
 
     sign_count = int.from_bytes(auth_data[33:37], "big")
 
     # 3. 提取 Attested Credential Data
     aaguid = auth_data[37:53]
     cred_id_len = int.from_bytes(auth_data[53:55], "big")
+    if not cred_id_len or len(auth_data) <= 55 + cred_id_len:
+        raise ValueError("Invalid credential data length")
     cred_id = auth_data[55 : 55 + cred_id_len]
     cose_data = auth_data[55 + cred_id_len :]
 
@@ -168,6 +173,7 @@ def verify_authentication_assertion(
     expected_challenge: str,
     public_key_pem: str,
     expected_rp_id: str,
+    expected_origin: str,
     stored_sign_count: int = 0,
 ) -> int:
     """
@@ -183,9 +189,15 @@ def verify_authentication_assertion(
     if not secrets.compare_digest(client_data.get("challenge", ""), expected_challenge):
         raise ValueError("WebAuthn challenge mismatch during authentication")
 
+    if client_data.get("origin") != expected_origin or client_data.get("crossOrigin", False):
+        raise ValueError("WebAuthn origin mismatch")
+
     auth_data = decode_b64url(authenticator_data_b64)
     if len(auth_data) < 37:
         raise ValueError("Invalid authenticatorData")
+
+    if not secrets.compare_digest(auth_data[:32], hashlib.sha256(expected_rp_id.encode("utf-8")).digest()):
+        raise ValueError("WebAuthn RP ID hash mismatch")
 
     flags = auth_data[32]
     up = bool(flags & 0x01)
@@ -193,6 +205,9 @@ def verify_authentication_assertion(
         raise ValueError("User presence flag (UP) must be true")
 
     new_sign_count = int.from_bytes(auth_data[33:37], "big")
+
+    if (new_sign_count or stored_sign_count) and new_sign_count <= stored_sign_count:
+        raise ValueError("WebAuthn signature counter did not increase")
 
     # 签名数据 = authenticatorData + SHA256(clientDataJSON)
     client_data_hash = hashlib.sha256(raw_client_data).digest()
@@ -208,4 +223,4 @@ def verify_authentication_assertion(
     else:
         raise ValueError("Unsupported public key type for verification")
 
-    return max(new_sign_count, stored_sign_count + 1)
+    return new_sign_count

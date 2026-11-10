@@ -1,31 +1,4 @@
-import { formatBytes, formatDate, maskUrl, getTrafficPercent } from '../utils/format.js';
-
-export default {
-  name: 'SourceCard',
-  props: {
-    source: { type: Object, required: true },
-    refreshing: { type: Boolean, default: false }
-  },
-  emits: ['refresh', 'delete'],
-  setup(props) {
-    const formatRemaining = (src) => {
-      if (src.remaining_text) return src.remaining_text;
-      if (src.traffic_total > 0) {
-        const rem = Math.max(0, src.traffic_total - (src.traffic_used || 0));
-        return formatBytes(rem);
-      }
-      return null;
-    };
-
-    return {
-      formatBytes,
-      formatDate,
-      maskUrl,
-      getTrafficPercent,
-      formatRemaining
-    };
-  },
-  template: `
+<template>
     <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 shadow-xs transition-all hover:border-slate-300 dark:hover:border-slate-700">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
@@ -89,5 +62,36 @@ export default {
         </div>
       </div>
     </div>
-  `
+  
+</template>
+
+<script>
+import { formatBytes, formatDate, maskUrl, getTrafficPercent } from '../utils/format.js';
+
+export default {
+  name: 'SourceCard',
+  props: {
+    source: { type: Object, required: true },
+    refreshing: { type: Boolean, default: false }
+  },
+  emits: ['refresh', 'delete'],
+  setup(props) {
+    const formatRemaining = (src) => {
+      if (src.remaining_text) return src.remaining_text;
+      if (src.traffic_total > 0) {
+        const rem = Math.max(0, src.traffic_total - (src.traffic_used || 0));
+        return formatBytes(rem);
+      }
+      return null;
+    };
+
+    return {
+      formatBytes,
+      formatDate,
+      maskUrl,
+      getTrafficPercent,
+      formatRemaining
+    };
+  }
 };
+</script>
