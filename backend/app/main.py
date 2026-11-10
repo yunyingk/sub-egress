@@ -46,18 +46,18 @@ frontend_dir = Path(os.getenv("FRONTEND_DIR", "/frontend"))
 if not frontend_dir.exists():
     frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
 
-@app.get("/login", include_in_schema=False)
+@app.api_route("/login", methods=["GET", "HEAD"], include_in_schema=False)
 async def serve_login():
     login_file = frontend_dir / "login.html"
     if login_file.exists():
         return FileResponse(str(login_file))
     return RedirectResponse(url="/")
 
-@app.get("/login.html", include_in_schema=False)
+@app.api_route("/login.html", methods=["GET", "HEAD"], include_in_schema=False)
 async def redirect_login_html():
     return RedirectResponse(url="/login", status_code=301)
 
-@app.get("/index.html", include_in_schema=False)
+@app.api_route("/index.html", methods=["GET", "HEAD"], include_in_schema=False)
 async def redirect_index_html():
     return RedirectResponse(url="/", status_code=301)
 
