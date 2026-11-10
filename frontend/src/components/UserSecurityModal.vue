@@ -186,42 +186,55 @@
           </button>
         </form>
 
-        <!-- 页签 3: 第三方登录绑定与解绑 (Authentik SSO) -->
-        <!-- 页签 3: 第三方登录绑定 (GitHub 身份与 Authentik SSO) -->
+        <!-- 页签 3: 第三方登录绑定 (GitHub 身份与 Authentik SSO 统一对齐) -->
         <div v-else-if="activeTab === 'oauth'" class="space-y-4">
-          <!-- 卡片 1: GitHub 外部身份 -->
-          <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+          <div v-for="provider in oauthProviders" :key="provider.key"
+               class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-750 shadow-xs">
+            <!-- 卡片头部: 统一尺寸图标 + 标题/描述 + 右侧统一胶囊徽标 -->
             <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 flex items-center justify-center text-lg">
-                  <i class="fa-brands fa-github"></i>
+              <div class="flex items-center gap-3">
+                <div :class="provider.iconBoxClass" class="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0">
+                  <i :class="provider.icon"></i>
                 </div>
                 <div>
-                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">GitHub 身份绑定</h4>
-                  <p class="text-[11px] text-slate-400">绑定 GitHub 账号一键快捷登录</p>
+                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">{{ provider.name }}</h4>
+                  <p class="text-[11px] text-slate-400">{{ provider.desc }}</p>
                 </div>
               </div>
               <div>
-                <span v-if="identities.length" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
-                  <i class="fa-solid fa-check text-[10px]"></i>已绑定 ({{ identities.length }})
+                <span v-if="getProviderIdentity(provider.key)" 
+                      class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                  <i class="fa-solid fa-check text-[10px]"></i>已绑定
                 </span>
-                <span v-else class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
+                <span v-else 
+                      class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
                   未绑定
                 </span>
               </div>
             </div>
 
-            <p v-if="identities.length === 0" class="text-xs text-slate-500 mb-2">尚未绑定 GitHub 身份</p>
-            <div v-for="identity in identities" :key="identity.id" class="flex items-center justify-between py-2 border-t border-slate-100 dark:border-slate-700 text-sm">
-              <span class="font-mono text-xs text-slate-700 dark:text-slate-300"><i class="fa-brands fa-github mr-2"></i>{{ identity.provider }} · ID: {{ identity.subject }}</span>
-              <div class="relative inline-block shrink-0">
-                <button class="text-rose-600 text-xs hover:underline cursor-pointer whitespace-nowrap"
-                        @click.stop="toggleConfirm(`id-${identity.id}`, `确定要解绑外部身份 [${identity.provider}] 吗？`, () => unlinkIdentity(identity.id))">
-                  解绑
+            <!-- 已绑定状态主体 -->
+            <div v-if="getProviderIdentity(provider.key)" class="pt-3 border-t border-slate-100 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="text-xs text-slate-600 dark:text-slate-300">
+                <div class="flex items-center gap-2">
+                  <span class="text-slate-400">绑定主体:</span>
+                  <span class="font-mono font-medium text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[11px]">
+                    {{ getProviderIdentity(provider.key).subject }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">已关联外部第三方账号，可使用该身份直接一键免密登录</p>
+              </div>
+
+              <div class="relative inline-block self-end sm:self-center shrink-0">
+                <button @click.stop="toggleConfirm(`oauth-${provider.key}`, `确定要解除【${provider.name}】的绑定吗？解除后将无法再通过该方式登录。`, () => handleUnlinkProvider(provider))"
+                        :disabled="loading"
+                        class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-xl transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 disabled:opacity-50">
+                  <i class="fa-solid fa-link-slash"></i>
+                  <span>解除绑定</span>
                 </button>
-                <div v-if="activeConfirm && activeConfirm.id === `id-${identity.id}`"
+                <div v-if="activeConfirm && activeConfirm.id === `oauth-${provider.key}`"
                      @click.stop
-                     class="absolute right-0 bottom-full mb-1 z-40 w-52 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
+                     class="absolute right-0 bottom-full mb-1 z-40 w-56 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
                   <div class="flex items-start gap-1.5 mb-2 text-slate-800 dark:text-slate-200">
                     <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
                     <span class="text-[11px] leading-tight">{{ activeConfirm.msg }}</span>
@@ -233,80 +246,17 @@
                 </div>
               </div>
             </div>
-            <div class="pt-2">
-              <a href="/api/auth/github/start?mode=link" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-all">
-                <i class="fa-brands fa-github"></i>
-                <span>绑定 GitHub 账号</span>
+
+            <!-- 未绑定状态主体 -->
+            <div v-else class="pt-3 border-t border-slate-100 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="text-xs text-slate-500 dark:text-slate-400">
+                尚未绑定此第三方身份源，绑定后可在登录页通过外部认证直接登录
+              </div>
+              <a :href="provider.bindUrl"
+                 class="px-3.5 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-xl shadow-xs transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer shrink-0 self-end sm:self-center">
+                <i class="fa-solid fa-plus"></i>
+                <span>立即绑定</span>
               </a>
-            </div>
-          </div>
-
-          <!-- 卡片 2: Authentik 单点登录 (SSO) -->
-          <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/30">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center text-lg">
-                  <i class="fa-solid fa-id-card-clip"></i>
-                </div>
-                <div>
-                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">Authentik 单点登录 (SSO)</h4>
-                  <p class="text-[11px] text-slate-400">通过统一身份网关直接授权登录</p>
-                </div>
-              </div>
-              <div>
-                <span v-if="user.oauth_provider" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
-                  <i class="fa-solid fa-check text-[10px]"></i>已绑定
-                </span>
-                <span v-else class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
-                  未绑定
-                </span>
-              </div>
-            </div>
-
-            <!-- 已绑定状态 -->
-            <div v-if="user.oauth_provider" class="space-y-3 pt-2 border-t border-slate-200/80 dark:border-slate-700/80">
-              <div class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                当前账号已与第三方身份提供商 <span class="font-semibold text-slate-800 dark:text-slate-100 font-mono">{{ user.oauth_provider }}</span> 关联。
-                关联标识: <span class="font-mono text-sky-600 dark:text-sky-400">{{ user.oauth_id || user.username }}</span>
-              </div>
-              <div class="flex items-center justify-between pt-1">
-                <span class="text-[11px] text-slate-400">若解绑，将无法直接通过 SSO 免密进入此账号</span>
-                <div class="relative inline-block shrink-0">
-                  <button @click.stop="toggleConfirm('oauth', '确定要解除第三方登录绑定吗？解除后将无法再通过 SSO 免密进入此账号。', handleUnbindOAuth)"
-                          :disabled="loading"
-                          class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg transition-all cursor-pointer whitespace-nowrap disabled:opacity-50">
-                    <i v-if="loading" class="fa-solid fa-circle-notch fa-spin mr-1"></i>
-                    <i v-else class="fa-solid fa-link-slash mr-1"></i>解除绑定
-                  </button>
-                  <div v-if="activeConfirm && activeConfirm.id === 'oauth'"
-                       @click.stop
-                       class="absolute right-0 bottom-full mb-1 z-40 w-56 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
-                    <div class="flex items-start gap-1.5 mb-2 text-slate-800 dark:text-slate-200">
-                      <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
-                      <span class="text-[11px] leading-tight">{{ activeConfirm.msg }}</span>
-                    </div>
-                    <div class="flex justify-end gap-1.5">
-                      <button @click="activeConfirm = null" class="px-2 py-0.5 text-[11px] rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer">取消</button>
-                      <button @click="runConfirm" class="px-2 py-0.5 text-[11px] rounded bg-rose-600 hover:bg-rose-500 text-white font-medium cursor-pointer">确定解除</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 未绑定状态 -->
-            <div v-else class="space-y-3 pt-2 border-t border-slate-200/80 dark:border-slate-700/80">
-              <div class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                绑定后，您可以在登录页面直接点击“第三方登录”，通过 Authentik 单点登录直接进入当前用户。
-              </div>
-              <div class="flex items-center justify-end pt-1">
-                <button type="button" @click="handleBindOAuth" :disabled="loading"
-                        class="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
-                  <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
-                  <i v-else class="fa-solid fa-link"></i>
-                  <span>重新绑定 Authentik</span>
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -393,18 +343,94 @@ export default {
       }
     };
 
-    const openOAuthTab = async () => {
-      activeTab.value = 'oauth';
+    const oauthProviders = [
+      {
+        key: 'github',
+        name: 'GitHub 账号绑定',
+        desc: '通过 GitHub 账号授权一键快捷登录',
+        icon: 'fa-brands fa-github',
+        iconBoxClass: 'bg-slate-900 text-white dark:bg-slate-700 dark:text-white',
+        bindUrl: '/api/auth/github/start?mode=link'
+      },
+      {
+        key: 'authentik',
+        name: 'Authentik 单点登录 (SSO)',
+        desc: '通过企业统一身份网关授权一键登录',
+        icon: 'fa-solid fa-id-card-clip',
+        iconBoxClass: 'bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400',
+        bindUrl: '/api/auth/sso/start?mode=link'
+      }
+    ];
+
+    const fetchIdentities = async () => {
       try {
         const response = await fetch('/api/user/identities');
-        if (response.ok) identities.value = await response.json();
-      } catch (error) { errorMessage.value = '无法读取外部身份列表'; }
+        if (response.ok) {
+          identities.value = await response.json();
+        }
+      } catch (error) {
+        console.error('Failed to load identities', error);
+      }
     };
-    const unlinkIdentity = async (identityId) => {
-      const response = await fetch(`/api/user/identities/${identityId}`, { method: 'DELETE' });
-      const data = await response.json();
-      if (!response.ok) { errorMessage.value = data.detail || '解绑失败'; return; }
-      identities.value = identities.value.filter((identity) => identity.id !== identityId);
+
+    const openOAuthTab = async () => {
+      activeTab.value = 'oauth';
+      errorMessage.value = '';
+      await fetchIdentities();
+    };
+
+    const getProviderIdentity = (providerKey) => {
+      const match = identities.value.find((i) => i.provider === providerKey);
+      if (match) return match;
+      if (props.user && props.user.oauth_provider === providerKey) {
+        return {
+          id: 'legacy',
+          provider: providerKey,
+          subject: props.user.oauth_id || props.user.username
+        };
+      }
+      return null;
+    };
+
+    const handleUnlinkProvider = async (provider) => {
+      const identity = getProviderIdentity(provider.key);
+      if (!identity) return;
+
+      errorMessage.value = '';
+      successMessage.value = '';
+      loading.value = true;
+
+      try {
+        if (identity.id === 'legacy') {
+          const res = await fetch('/api/user/unbind-oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: provider.key })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            successMessage.value = `已成功解除 ${provider.name} 绑定`;
+            await fetchIdentities();
+            emit('userUpdated');
+          } else {
+            errorMessage.value = data.detail || '解绑失败';
+          }
+        } else {
+          const res = await fetch(`/api/user/identities/${identity.id}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (res.ok) {
+            successMessage.value = `已成功解除 ${provider.name} 绑定`;
+            identities.value = identities.value.filter((i) => i.id !== identity.id);
+            emit('userUpdated');
+          } else {
+            errorMessage.value = data.detail || '解绑失败';
+          }
+        }
+      } catch (e) {
+        errorMessage.value = '解绑请求异常，请稍后重试';
+      } finally {
+        loading.value = false;
+      }
     };
 
     const isPasskeyLimitReached = computed(() => passkeys.value.length >= 5);
@@ -591,54 +617,6 @@ export default {
       }
     };
 
-    // 解除第三方统一登录授权 (Authentik SSO)
-    const handleUnbindOAuth = async () => {
-      errorMessage.value = '';
-      successMessage.value = '';
-      loading.value = true;
-
-      try {
-        const res = await fetch('/api/user/unbind-oauth', { method: 'POST' });
-        const data = await res.json();
-        if (res.ok) {
-          successMessage.value = '第三方登录已成功解除绑定！';
-          emit('userUpdated');
-        } else {
-          errorMessage.value = data.detail || '解绑失败，请检查账号安全配置';
-        }
-      } catch (e) {
-        errorMessage.value = '网络请求异常，请稍后重试';
-      } finally {
-        loading.value = false;
-      }
-    };
-
-    // 绑定当前第三方统一登录授权 (Authentik SSO)
-    const handleBindOAuth = async () => {
-      errorMessage.value = '';
-      successMessage.value = '';
-      loading.value = true;
-
-      try {
-        const res = await fetch('/api/user/bind-oauth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: 'authentik' })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          successMessage.value = '已成功绑定第三方登录 (Authentik SSO)！';
-          emit('userUpdated');
-        } else {
-          errorMessage.value = data.detail || '绑定失败，请稍后重试';
-        }
-      } catch (e) {
-        errorMessage.value = '网络请求异常，请稍后重试';
-      } finally {
-        loading.value = false;
-      }
-    };
-
     onMounted(() => {
       window.addEventListener('click', () => {
         activeConfirm.value = null;
@@ -650,6 +628,7 @@ export default {
         errorMessage.value = '';
         successMessage.value = '';
         fetchPasskeys();
+        fetchIdentities();
       }
     });
 
@@ -658,8 +637,10 @@ export default {
       loading,
       passkeys,
       identities,
+      oauthProviders,
       openOAuthTab,
-      unlinkIdentity,
+      getProviderIdentity,
+      handleUnlinkProvider,
       newPasskeyName,
       isPasskeyLimitReached,
       errorMessage,
@@ -673,9 +654,7 @@ export default {
       generatePassword,
       registerPasskey,
       deletePasskey,
-      submitChangePassword,
-      handleUnbindOAuth,
-      handleBindOAuth
+      submitChangePassword
     };
   }
 };

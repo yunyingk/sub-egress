@@ -135,15 +135,19 @@ async def github_oauth_callback(request: Request, db: Annotated[AsyncSession, De
     if state_data.get("mode") == "link":
         user = await db.get(User, state_data.get("user_id"))
         if not user or not user.is_active:
-            raise HTTPException(status_code=401, detail="待绑定的本地账号不可用")
+            response = RedirectResponse("/login?error=session_expired", status_code=302)
+            response.delete_cookie("github_oauth_state", path="/")
+            return response
         if identity and identity.user_id != user.id:
-            raise HTTPException(status_code=409, detail="此 GitHub 账号已绑定到其他用户")
+            response = RedirectResponse("/?error=github_already_linked", status_code=302)
+            response.delete_cookie("github_oauth_state", path="/")
+            return response
         if not identity:
             identity = OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject)
             db.add(identity)
         user.last_login_at = datetime.now(UTC)
         await db.commit()
-        response = RedirectResponse("/", status_code=302)
+        response = RedirectResponse("/?msg=github_linked", status_code=302)
         response.delete_cookie("github_oauth_state", path="/")
         return response
     else:
@@ -420,11 +424,29 @@ async def auth_logout(response: Response):
     return {"status": "ok", "message": "已成功退出登录"}
 
 
+@router.get("/api/auth/sso/start", summary="发起 Authentik SSO 认证或绑定流程")
+async def auth_sso_start(request: Request, db: Annotated[AsyncSession, Depends(get_db)], mode: str = "login"):
+    if mode not in {"login", "link"}:
+        raise HTTPException(status_code=400, detail="SSO mode 无效")
+
+    if mode == "link":
+        local_user = await get_current_user_optional(request, db, request.cookies.get("sub_egress_session"))
+        if not local_user:
+            return RedirectResponse("/login?error=session_expired", status_code=302)
+        callback_rd = "/api/auth/sso/callback?mode=link"
+    else:
+        callback_rd = "/api/auth/sso/callback"
+
+    outpost_url = f"/outpost.goauthentik.io/start?rd={urllib.parse.quote(callback_rd)}"
+    return RedirectResponse(outpost_url, status_code=302)
+
+
 @router.get("/api/auth/sso/callback", summary="Authentik 第三方 SSO 回调处理与会话发放")
 async def auth_sso_callback(
     request: Request,
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
+    mode: str = "login",
     x_authentik_username: Annotated[str | None, Header()] = None,
     x_authentik_email: Annotated[str | None, Header()] = None,
     x_forwarded_user: Annotated[str | None, Header()] = None,
@@ -433,10 +455,42 @@ async def auth_sso_callback(
     sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
     sso_subject = (x_authentik_uid or "").strip()
     if not sso_user or not sso_subject:
-        # 若未携带 SSO 鉴权身份头，退回登录页
-        return RedirectResponse(url="/login?error=sso_unauthorized", status_code=302)
+        # 若未携带 SSO 鉴权身份头，说明未经反代鉴权或已被拦截
+        target_error = "sso_unauthorized"
+        if mode == "link":
+            return RedirectResponse(url=f"/?error={target_error}", status_code=302)
+        return RedirectResponse(url=f"/login?error={target_error}", status_code=302)
 
-    # Resolve by stable provider subject. Never link accounts by a mutable username.
+    # 绑定模式 (mode == "link")
+    if mode == "link":
+        current_user = await get_current_user_optional(request, db, request.cookies.get("sub_egress_session"))
+        if not current_user or not current_user.is_active:
+            return RedirectResponse(url="/login?error=session_expired", status_code=302)
+
+        # 检查该 Authentik UID 是否已被其他系统用户占用
+        existing_identity_res = await db.execute(
+            select(OAuthIdentity).where(OAuthIdentity.issuer == "authentik", OAuthIdentity.subject == sso_subject)
+        )
+        existing_identity = existing_identity_res.scalar_one_or_none()
+        if existing_identity and existing_identity.user_id != current_user.id:
+            return RedirectResponse(url="/?error=authentik_already_linked", status_code=302)
+
+        legacy_res = await db.execute(
+            select(User).where(User.oauth_provider == "authentik", User.oauth_id == sso_user)
+        )
+        legacy_other = legacy_res.scalar_one_or_none()
+        if legacy_other and legacy_other.id != current_user.id:
+            return RedirectResponse(url="/?error=authentik_already_linked", status_code=302)
+
+        if not existing_identity:
+            db.add(OAuthIdentity(user_id=current_user.id, provider="authentik", issuer="authentik", subject=sso_subject))
+        current_user.oauth_provider = "authentik"
+        current_user.oauth_id = sso_user
+        current_user.last_login_at = datetime.now(UTC)
+        await db.commit()
+        return RedirectResponse(url="/?msg=authentik_linked", status_code=302)
+
+    # 登录模式 (mode == "login")
     identity_result = await db.execute(
         select(OAuthIdentity).where(OAuthIdentity.issuer == "authentik", OAuthIdentity.subject == sso_subject)
     )
@@ -833,11 +887,17 @@ class BindOAuthPayload(BaseModel):
     provider: str | None = "authentik"
     oauth_id: str | None = None
 
+class UnbindOAuthPayload(BaseModel):
+    provider: str | None = "authentik"
+
 @router.post("/api/user/unbind-oauth", summary="当前用户解绑第三方身份源")
 async def user_unbind_oauth(
     user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)]
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: UnbindOAuthPayload | None = None
 ):
+    provider = ((payload and payload.provider) or "authentik").strip().lower()
+
     # 安全防自锁检查：若用户未设置本地密码且没有任何通行密钥，禁止解绑以防账号无法登录！
     if not user.password_hash:
         count_stmt = select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id)
@@ -848,8 +908,13 @@ async def user_unbind_oauth(
                 detail="为了您的账户安全，解绑第三方登录前请先设置登录密码或至少绑定一个通行密钥，以防账号无法登录。"
             )
 
-    user.oauth_provider = None
-    user.oauth_id = None
+    if user.oauth_provider == provider:
+        user.oauth_provider = None
+        user.oauth_id = None
+
+    await db.execute(
+        delete(OAuthIdentity).where(OAuthIdentity.user_id == user.id, OAuthIdentity.provider == provider)
+    )
     await db.commit()
     return {"status": "ok", "message": "已成功解除第三方登录绑定"}
 
@@ -860,25 +925,68 @@ async def user_bind_oauth(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     x_authentik_username: Annotated[str | None, Header()] = None,
+    x_authentik_uid: Annotated[str | None, Header()] = None,
     x_forwarded_user: Annotated[str | None, Header()] = None,
 ):
     provider = (payload.provider or "authentik").strip().lower()
-    sso_user = (payload.oauth_id or x_authentik_username or x_forwarded_user or user.username).strip()
-    user.oauth_provider = provider
-    user.oauth_id = sso_user
-    # 同步记录到 OAuthIdentity
-    existing = await db.execute(
-        select(OAuthIdentity).where(OAuthIdentity.user_id == user.id, OAuthIdentity.provider == provider)
-    )
-    if not existing.scalar_one_or_none():
-        db.add(OAuthIdentity(user_id=user.id, provider=provider, issuer=provider, subject=sso_user))
-    await db.commit()
-    return {"status": "ok", "message": f"已成功绑定第三方登录 ({user.oauth_provider}: {user.oauth_id})"}
+    if provider == "authentik":
+        sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
+        sso_subject = (x_authentik_uid or "").strip()
+        if not sso_user or not sso_subject:
+            raise HTTPException(
+                status_code=400,
+                detail="未检测到有效的 Authentik 网关认证凭证，请点击【立即绑定】完成 Authentik 身份授权"
+            )
+
+        # 检查该 Authentik 账号是否已被其他用户绑定
+        existing = await db.execute(
+            select(OAuthIdentity).where(OAuthIdentity.issuer == "authentik", OAuthIdentity.subject == sso_subject)
+        )
+        identity = existing.scalar_one_or_none()
+        if identity and identity.user_id != user.id:
+            raise HTTPException(status_code=409, detail="该 Authentik 账号已绑定至其他系统用户")
+
+        user.oauth_provider = provider
+        user.oauth_id = sso_user
+        if not identity:
+            db.add(OAuthIdentity(user_id=user.id, provider=provider, issuer=provider, subject=sso_subject))
+        await db.commit()
+        return {"status": "ok", "message": f"已成功绑定 Authentik 账号 ({user.oauth_id})"}
+
+    raise HTTPException(status_code=400, detail="不支持的第三方身份提供商")
+
 
 @router.get("/api/user/identities", summary="列出当前账号已绑定身份")
 async def user_list_identities(user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(select(OAuthIdentity).where(OAuthIdentity.user_id == user.id).order_by(OAuthIdentity.id))
-    return [{"id": identity.id, "provider": identity.provider, "created_at": identity.created_at.isoformat() if identity.created_at else None} for identity in result.scalars()]
+    identities = list(result.scalars().all())
+
+    # 兼容历史数据：若 user.oauth_provider 存在但未在 OAuthIdentity 中建档，自动同步补齐
+    if user.oauth_provider and user.oauth_id:
+        has_provider = any(i.provider == user.oauth_provider for i in identities)
+        if not has_provider:
+            new_id = OAuthIdentity(
+                user_id=user.id,
+                provider=user.oauth_provider,
+                issuer=user.oauth_provider,
+                subject=user.oauth_id
+            )
+            db.add(new_id)
+            await db.commit()
+            await db.refresh(new_id)
+            identities.append(new_id)
+
+    return [
+        {
+            "id": identity.id,
+            "provider": identity.provider,
+            "issuer": identity.issuer,
+            "subject": identity.subject,
+            "created_at": identity.created_at.isoformat() if identity.created_at else None
+        }
+        for identity in identities
+    ]
+
 
 @router.delete("/api/user/identities/{identity_id}", summary="解绑当前账号的指定身份")
 async def user_unlink_identity(identity_id: int, user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
@@ -891,9 +999,15 @@ async def user_unlink_identity(identity_id: int, user: Annotated[User, Depends(g
         passkeys = await db.scalar(select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == user.id))
         if not passkeys:
             raise HTTPException(status_code=400, detail="请先设置密码或绑定其他通行密钥，再解绑最后一个登录身份")
+
+    if user.oauth_provider == identity.provider:
+        user.oauth_provider = None
+        user.oauth_id = None
+
+    provider_name = identity.provider
     await db.delete(identity)
     await db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "message": f"已成功解除 {provider_name} 绑定"}
 
 
 # ==================== 管理员管理面板 API (独立页签与专属权限) ====================
@@ -1130,6 +1244,7 @@ async def admin_unbind_user_oauth(
         raise HTTPException(status_code=404, detail="用户不存在")
     user.oauth_provider = None
     user.oauth_id = None
+    await db.execute(delete(OAuthIdentity).where(OAuthIdentity.user_id == user.id))
     await db.commit()
     return {"status": "ok", "message": f"用户 {user.username} 的第三方授权已解除"}
 
