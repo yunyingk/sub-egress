@@ -160,7 +160,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
 
 async def sync_all_sources():
     async with AsyncSessionLocal() as session:
-        stmt = select(Source.id).where(Source.enabled == True)
+        stmt = select(Source.id).where(Source.enabled.is_(True))
         result = await session.execute(stmt)
         source_ids = result.scalars().all()
         for sid in source_ids:

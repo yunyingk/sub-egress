@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .auth_webauthn import (
-    decode_b64url,
     encode_b64url,
     generate_challenge,
     parse_and_verify_registration,
@@ -31,7 +30,6 @@ from .security import (
     generate_secure_password,
     hash_password,
     validate_password,
-    validate_username,
     verify_password,
     verify_session_token,
 )
@@ -858,19 +856,18 @@ async def export_subscription(
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
-        .where(Source.enabled == True)
+        .where(Source.enabled.is_(True))
     )
     if matched_user:
-        stmt = stmt.where((Source.is_shared == True) | (Source.user_id == matched_user.id))
+        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
     else:
-        stmt = stmt.where(Source.is_shared == True)
+        stmt = stmt.where(Source.is_shared.is_(True))
 
     stmt = stmt.order_by(Node.country_code, Node.id)
     result = await db.execute(stmt)
     rows = result.all()
 
     nodes_list = []
-    source_traffic_info = {}
     for node, source_name in rows:
         cfg = dict(node.config_json)
         cfg["source_name"] = source_name
@@ -880,11 +877,11 @@ async def export_subscription(
         nodes_list.append(cfg)
 
     # 计算总流量与到期时间
-    src_stmt = select(Source).where(Source.enabled == True)
+    src_stmt = select(Source).where(Source.enabled.is_(True))
     if matched_user:
-        src_stmt = src_stmt.where((Source.is_shared == True) | (Source.user_id == matched_user.id))
+        src_stmt = src_stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
     else:
-        src_stmt = src_stmt.where(Source.is_shared == True)
+        src_stmt = src_stmt.where(Source.is_shared.is_(True))
 
     src_res = await db.execute(src_stmt)
     sources = src_res.scalars().all()
@@ -1117,7 +1114,7 @@ async def list_sources(
 ):
     stmt = select(Source).order_by(Source.id)
     if user and user.role != "admin":
-        stmt = stmt.where((Source.is_shared == True) | (Source.user_id == user.id))
+        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
 
     res = await db.execute(stmt)
     sources = res.scalars().all()
@@ -1243,10 +1240,10 @@ async def list_nodes(
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
-        .where(Source.enabled == True)
+        .where(Source.enabled.is_(True))
     )
     if user and user.role != "admin":
-        stmt = stmt.where((Source.is_shared == True) | (Source.user_id == user.id))
+        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
 
     stmt = stmt.order_by(Node.country_code, Node.id)
     res = await db.execute(stmt)

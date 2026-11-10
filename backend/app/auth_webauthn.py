@@ -7,7 +7,7 @@ import hashlib
 import json
 import secrets
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import cbor2
 from cryptography.hazmat.primitives import hashes, serialization

@@ -108,7 +108,7 @@ async def init_db():
 
                 print("\n" + "=" * 70)
                 print("[sub-egress] 首次启动：成功创建初始管理员账号 (ADMIN INITIALIZED)")
-                print(f"用户名 (Username)   : admin")
+                print("用户名 (Username)   : admin")
                 print(f"初始密码 (Password) : {init_admin_pwd}")
                 print(f"订阅令牌 (Token)    : {inherited_token}")
                 print("说明: 密码符合全小写规范 (禁止大写字母)，请妥善保管。")

@@ -6,7 +6,6 @@ Usage:
     python -m app.manage list-users
 """
 import asyncio
-import os
 import secrets
 import sys
 from sqlalchemy import select

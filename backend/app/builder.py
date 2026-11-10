@@ -438,14 +438,10 @@ def build_singbox_config(
     """
     outbounds: List[Dict[str, Any]] = []
     pass_through_tags: List[str] = []
-    japan_tags: List[str] = []
-    residential_tags: List[str] = []
 
     for item in raw_nodes:
         s = copy.deepcopy(item.get("config_json", {}))
         tag = item.get("display_name")
-        country_code = item.get("country_code", "OTHER")
-        is_res = item.get("is_residential", False)
         ntype = s.get("type", "").lower()
 
         outbound = None

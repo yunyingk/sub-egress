@@ -1,6 +1,4 @@
 import base64
-import json
-import re
 from typing import Any, Dict, List
 import urllib.parse
 from .clash import is_ad_node
