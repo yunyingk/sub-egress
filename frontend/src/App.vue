@@ -112,6 +112,19 @@
         @logout="handleLogout"
       />
 
+      <!-- 全局浮动通知横幅 (OAuth 绑定与操作反馈) -->
+      <div v-if="globalNotification" 
+           :class="globalNotification.type === 'error' ? 'bg-rose-50 dark:bg-rose-950/70 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200' : 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'"
+           class="mb-6 p-4 rounded-2xl border shadow-xs flex items-center justify-between text-xs transition-all">
+        <div class="flex items-center gap-2.5">
+          <i :class="globalNotification.type === 'error' ? 'fa-solid fa-circle-exclamation text-rose-500 text-base' : 'fa-solid fa-circle-check text-emerald-500 text-base'"></i>
+          <span class="font-medium leading-relaxed">{{ globalNotification.text }}</span>
+        </div>
+        <button @click="globalNotification = null" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
       <!-- 主工作区：上游数据源与下游分发中心 -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-10">
         <div class="lg:col-span-6">
@@ -243,6 +256,7 @@ export default {
     const showAddModal = ref(false);
     const savingSettings = ref(false);
     const creatingSource = ref(false);
+    const globalNotification = ref(null);
 
     const settings = ref({
       sub_hash_token: 'e699ffd91845385075b27d813b8590df40375c6af2c4eb77',
@@ -464,6 +478,31 @@ export default {
       fetchSources();
       fetchNodes();
       fetchSettings();
+
+      // 检查第三方登录 / SSO 绑定授权回调状态反馈
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const msg = urlParams.get('msg');
+        const err = urlParams.get('error');
+        if (msg === 'github_linked') {
+          globalNotification.value = { type: 'success', text: '🎉 成功绑定 GitHub 账号！下次可直接通过 GitHub 免密登录。' };
+          showSecurityModal.value = true;
+        } else if (msg === 'authentik_linked') {
+          globalNotification.value = { type: 'success', text: '🎉 成功绑定 Authentik 单点登录账号！下次可直接通过 Authentik 统一网关免密登录。' };
+          showSecurityModal.value = true;
+        } else if (err === 'github_already_linked') {
+          globalNotification.value = { type: 'error', text: '⚠️ 该 GitHub 账号已被其他系统用户绑定，无法重复关联。' };
+          showSecurityModal.value = true;
+        } else if (err === 'authentik_already_linked') {
+          globalNotification.value = { type: 'error', text: '⚠️ 该 Authentik 账号已被其他系统用户绑定，无法重复关联。' };
+          showSecurityModal.value = true;
+        } else if (err === 'sso_unauthorized') {
+          globalNotification.value = { type: 'error', text: '⚠️ 第三方单点登录授权未通过，请检查 Authentik 网关状态。' };
+        }
+        if (msg || err) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {}
     });
 
     return {
@@ -486,6 +525,7 @@ export default {
       savingSettings,
       showAddModal,
       creatingSource,
+      globalNotification,
       appVersion,
       fetchCurrentUser,
       refreshAll,
