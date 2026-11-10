@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Account Appearance**: Save light, dark, or system appearance per user and synchronize it across devices.
 - **Source Ownership**: Distinguish the private owner or platform ownership from the user who created a source.
 
+### Fixed
+- **External Identities**: Show linked providers in user administration and handle Authentik reverse-proxy identity headers.
+
 ### Changed
 - **Source API**: Replace source `user_id` with `owner_user_id` and `created_by_user_id`. Historical creators remain unknown when they cannot be established.
 - **Subscription Tokens**: Retire the legacy global token and prevent manually chosen user tokens. Existing administrator personal tokens remain valid. Anonymous shared subscriptions remain available when token enforcement is disabled.

@@ -66,6 +66,7 @@ class User(Base):
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     passkeys = relationship("PasskeyCredential", back_populates="user", cascade="all, delete-orphan")
+    identities = relationship("OAuthIdentity", back_populates="user", cascade="all, delete-orphan")
     sources = relationship("Source", back_populates="owner", foreign_keys="Source.owner_user_id")
 
     def get_disabled_shared_source_ids(self) -> set[int]:
@@ -102,7 +103,7 @@ class OAuthIdentity(Base):
     subject = Column(String(255), nullable=False)
     created_at = Column(UTCDateTime, default=utc_now, nullable=False)
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_oauth_identity_issuer_subject"),)
-    user = relationship("User")
+    user = relationship("User", back_populates="identities")
 
 
 class Source(Base):
