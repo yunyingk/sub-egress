@@ -1,5 +1,5 @@
-ARG PYTHON_IMAGE=python:3.14-slim
-ARG NODE_IMAGE=node:24.12.0-slim
+ARG PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.14-slim
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:24-alpine
 FROM ${NODE_IMAGE} AS frontend-build
 WORKDIR /frontend-src
 COPY frontend/package.json frontend/package-lock.json ./

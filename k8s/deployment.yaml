@@ -58,6 +58,8 @@ spec:
             - name: DATA_DIR
               value: "/data"
             # Set WEBAUTHN_ORIGIN to the browser's exact HTTPS origin before enabling passkeys.
+            - name: WEBAUTHN_ORIGIN
+              value: "https://sub.ying-qing.cn"
           volumeMounts:
             - name: data-volume
               mountPath: /data

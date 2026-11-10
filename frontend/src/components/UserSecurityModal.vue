@@ -120,9 +120,24 @@
                   </div>
                 </div>
 
-                <button @click="deletePasskey(pk.id, pk.name)" class="self-end sm:self-center px-2.5 py-1 text-xs text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-all cursor-pointer">
-                  <i class="fa-regular fa-trash-can mr-1"></i>解绑
-                </button>
+                <div class="relative inline-block self-end sm:self-center">
+                  <button @click.stop="toggleConfirm(`pk-${pk.id}`, `确定要解绑通行密钥【${pk.name}】吗？解绑后将无法使用该设备免密登录。`, () => deletePasskey(pk.id, pk.name))"
+                          class="px-2.5 py-1 text-xs text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-all cursor-pointer">
+                    <i class="fa-regular fa-trash-can mr-1"></i>解绑
+                  </button>
+                  <div v-if="activeConfirm && activeConfirm.id === `pk-${pk.id}`"
+                       @click.stop
+                       class="absolute right-0 bottom-full mb-1 z-40 w-56 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
+                    <div class="flex items-start gap-1.5 mb-2 text-slate-800 dark:text-slate-200">
+                      <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
+                      <span class="text-[11px] leading-tight">{{ activeConfirm.msg }}</span>
+                    </div>
+                    <div class="flex justify-end gap-1.5">
+                      <button @click="activeConfirm = null" class="px-2 py-0.5 text-[11px] rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer">取消</button>
+                      <button @click="runConfirm" class="px-2 py-0.5 text-[11px] rounded bg-rose-600 hover:bg-rose-500 text-white font-medium cursor-pointer">确定解绑</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -178,7 +193,24 @@
             <p v-if="identities.length === 0" class="text-xs text-slate-500">尚未绑定 GitHub 身份</p>
             <div v-for="identity in identities" :key="identity.id" class="flex items-center justify-between py-2 border-t text-sm">
               <span><i class="fa-brands fa-github mr-2"></i>{{ identity.provider }} · {{ identity.subject }}</span>
-              <button class="text-rose-600 text-xs" @click="unlinkIdentity(identity.id)">解绑</button>
+              <div class="relative inline-block">
+                <button class="text-rose-600 text-xs hover:underline cursor-pointer"
+                        @click.stop="toggleConfirm(`id-${identity.id}`, `确定要解绑外部身份 [${identity.provider}] 吗？`, () => unlinkIdentity(identity.id))">
+                  解绑
+                </button>
+                <div v-if="activeConfirm && activeConfirm.id === `id-${identity.id}`"
+                     @click.stop
+                     class="absolute right-0 bottom-full mb-1 z-40 w-52 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
+                  <div class="flex items-start gap-1.5 mb-2 text-slate-800 dark:text-slate-200">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
+                    <span class="text-[11px] leading-tight">{{ activeConfirm.msg }}</span>
+                  </div>
+                  <div class="flex justify-end gap-1.5">
+                    <button @click="activeConfirm = null" class="px-2 py-0.5 text-[11px] rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer">取消</button>
+                    <button @click="runConfirm" class="px-2 py-0.5 text-[11px] rounded bg-rose-600 hover:bg-rose-500 text-white font-medium cursor-pointer">确定解绑</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <a href="/api/auth/github/start?mode=link" class="inline-flex mt-3 px-3 py-2 rounded-lg bg-slate-900 text-white text-xs"><i class="fa-brands fa-github mr-2"></i>绑定 GitHub 账号</a>
           </div>
@@ -211,11 +243,26 @@
               </div>
               <div class="flex items-center justify-between pt-1">
                 <span class="text-[11px] text-slate-400">若解绑，将无法直接通过 SSO 免密进入此账号</span>
-                <button @click="handleUnbindOAuth" :disabled="loading"
-                        class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg transition-all cursor-pointer disabled:opacity-50">
-                  <i v-if="loading" class="fa-solid fa-circle-notch fa-spin mr-1"></i>
-                  <i v-else class="fa-solid fa-link-slash mr-1"></i>解除绑定
-                </button>
+                <div class="relative inline-block">
+                  <button @click.stop="toggleConfirm('oauth', '确定要解除第三方登录绑定吗？解除后将无法再通过 SSO 免密进入此账号。', handleUnbindOAuth)"
+                          :disabled="loading"
+                          class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg transition-all cursor-pointer disabled:opacity-50">
+                    <i v-if="loading" class="fa-solid fa-circle-notch fa-spin mr-1"></i>
+                    <i v-else class="fa-solid fa-link-slash mr-1"></i>解除绑定
+                  </button>
+                  <div v-if="activeConfirm && activeConfirm.id === 'oauth'"
+                       @click.stop
+                       class="absolute right-0 bottom-full mb-1 z-40 w-56 p-3 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 text-xs text-left">
+                    <div class="flex items-start gap-1.5 mb-2 text-slate-800 dark:text-slate-200">
+                      <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
+                      <span class="text-[11px] leading-tight">{{ activeConfirm.msg }}</span>
+                    </div>
+                    <div class="flex justify-end gap-1.5">
+                      <button @click="activeConfirm = null" class="px-2 py-0.5 text-[11px] rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer">取消</button>
+                      <button @click="runConfirm" class="px-2 py-0.5 text-[11px] rounded bg-rose-600 hover:bg-rose-500 text-white font-medium cursor-pointer">确定解除</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -246,7 +293,7 @@
 </template>
 
 <script>
-import { ref, reactive, watch, computed } from 'vue';
+import { ref, reactive, watch, computed, onMounted } from 'vue';
 
 // 辅助 Base64URL 转换函数
 function bufferToBase64url(buffer) {
@@ -298,6 +345,23 @@ export default {
     const newPasskeyName = ref('');
     const errorMessage = ref('');
     const successMessage = ref('');
+    const activeConfirm = ref(null);
+
+    const toggleConfirm = (id, msg, onConfirm) => {
+      if (activeConfirm.value && activeConfirm.value.id === id) {
+        activeConfirm.value = null;
+      } else {
+        activeConfirm.value = { id, msg, onConfirm };
+      }
+    };
+
+    const runConfirm = async () => {
+      if (activeConfirm.value && typeof activeConfirm.value.onConfirm === 'function') {
+        const fn = activeConfirm.value.onConfirm;
+        activeConfirm.value = null;
+        await fn();
+      }
+    };
 
     const openOAuthTab = async () => {
       activeTab.value = 'oauth';
@@ -436,7 +500,6 @@ export default {
 
     // 解除已绑定的通行密钥
     const deletePasskey = async (id, name) => {
-      if (!confirm(`确定要解绑通行密钥【${name}】吗？解绑后将无法使用该设备免密登录。`)) return;
       try {
         const res = await fetch(`/api/user/passkeys/${id}`, { method: 'DELETE' });
         if (res.ok) {
@@ -449,6 +512,7 @@ export default {
         }
       } catch (e) {
         console.error('Failed to delete passkey', e);
+        errorMessage.value = '解绑失败';
       }
     };
 
@@ -499,7 +563,6 @@ export default {
 
     // 解除第三方统一登录授权 (Authentik SSO)
     const handleUnbindOAuth = async () => {
-      if (!confirm('确定要解除第三方登录绑定吗？解除后将无法再通过 Authentik 单点登录直接进入此账号。')) return;
       errorMessage.value = '';
       successMessage.value = '';
       loading.value = true;
@@ -546,6 +609,12 @@ export default {
       }
     };
 
+    onMounted(() => {
+      window.addEventListener('click', () => {
+        activeConfirm.value = null;
+      });
+    });
+
     watch(() => props.visible, (val) => {
       if (val) {
         errorMessage.value = '';
@@ -565,6 +634,9 @@ export default {
       isPasskeyLimitReached,
       errorMessage,
       successMessage,
+      activeConfirm,
+      toggleConfirm,
+      runConfirm,
       passwordForm,
       formatTime,
       checkPasswordUppercase,
