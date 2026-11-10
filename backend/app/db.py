@@ -51,6 +51,7 @@ async def init_db():
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS code VARCHAR(8);"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS user_id INTEGER;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_shared BOOLEAN DEFAULT TRUE;"))
+            await conn.execute(text("ALTER TABLE sources DROP CONSTRAINT IF EXISTS sources_name_key;"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_proxy_domains TEXT DEFAULT '';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_rules TEXT DEFAULT '';"))

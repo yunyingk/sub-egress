@@ -2,10 +2,19 @@
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl max-w-md w-full p-6 space-y-5">
         <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-          <h3 class="font-bold text-base text-slate-900 dark:text-white">添加上游数据源</h3>
-          <button @click="$emit('close')" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+          <h3 class="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+            <i class="fa-solid fa-lock text-sky-500"></i>
+            <span>添加个人专属节点源</span>
+          </h3>
+          <button @click="$emit('close')" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
             <i class="fa-solid fa-xmark text-lg"></i>
           </button>
+        </div>
+
+        <!-- 专属私有提示卡片 -->
+        <div class="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-900/60 text-[11px] text-sky-800 dark:text-sky-300 flex items-start gap-2">
+          <i class="fa-solid fa-shield-halved text-sky-500 mt-0.5 shrink-0"></i>
+          <span>此数据源为<strong>个人专属私有</strong>，仅绑定至您的当前账号与个人订阅中，绝不对其他租户公开或共享。若需配置全站公共源，请在管理员控制台配置。</span>
         </div>
 
         <div class="space-y-3">

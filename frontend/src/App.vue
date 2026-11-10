@@ -67,13 +67,19 @@
         </div>
       </header>
 
-      <!-- 二级 Tab 导航切换器: ?tab=users vs ?tab=rules -->
+      <!-- 三级 Tab 导航切换器: ?tab=users vs ?tab=sources vs ?tab=rules -->
       <div class="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 w-fit">
         <button @click="switchAdminTab('users')" 
                 :class="adminTab === 'users' ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
                 class="px-4 py-2 text-xs sm:text-sm rounded-xl transition-all flex items-center gap-2 cursor-pointer">
           <i class="fa-solid fa-users-gear text-sm"></i>
           <span>用户与租户管理</span>
+        </button>
+        <button @click="switchAdminTab('sources')" 
+                :class="adminTab === 'sources' ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                class="px-4 py-2 text-xs sm:text-sm rounded-xl transition-all flex items-center gap-2 cursor-pointer">
+          <i class="fa-solid fa-network-wired text-sm"></i>
+          <span>平台共享数据源</span>
         </button>
         <button @click="switchAdminTab('rules')" 
                 :class="adminTab === 'rules' ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
@@ -86,7 +92,10 @@
       <!-- Tab 1: 用户管理 -->
       <AdminPanel v-if="adminTab === 'users'" :visible="true" :current-admin="currentUser" @close="navigateHome" />
 
-      <!-- Tab 2: 全局规则与设置 -->
+      <!-- Tab 2: 平台共享数据源 -->
+      <AdminSources v-else-if="adminTab === 'sources'" :current-admin="currentUser" />
+
+      <!-- Tab 3: 全局规则与设置 -->
       <AdminRules v-else-if="adminTab === 'rules'" />
     </div>
   </div>
@@ -167,6 +176,7 @@ import AddSourceModal from './components/AddSourceModal.vue';
 import UserSecurityModal from './components/UserSecurityModal.vue';
 import AdminPanel from './components/AdminPanel.vue';
 import AdminRules from './components/AdminRules.vue';
+import AdminSources from './components/AdminSources.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 
 export default {
@@ -181,6 +191,7 @@ export default {
     UserSecurityModal,
     AdminPanel,
     AdminRules,
+    AdminSources,
     ThemeToggle
   },
   setup() {
@@ -193,9 +204,12 @@ export default {
     const getInitialAdminTab = () => {
       const p = window.location.pathname;
       if (p === '/admin/rules') return 'rules';
+      if (p === '/admin/sources') return 'sources';
       if (p === '/admin/users') return 'users';
       const params = new URLSearchParams(window.location.search);
-      return params.get('tab') === 'rules' ? 'rules' : 'users';
+      const tab = params.get('tab');
+      if (tab === 'rules' || tab === 'sources' || tab === 'users') return tab;
+      return 'users';
     };
 
     const adminTab = ref(getInitialAdminTab());

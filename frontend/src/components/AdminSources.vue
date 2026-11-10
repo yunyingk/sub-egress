@@ -1,0 +1,395 @@
+<template>
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full p-6 md:p-8 flex flex-col space-y-6">
+    <!-- 头部说明与操作区 -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-200 dark:border-slate-700 gap-4 shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+          <i class="fa-solid fa-network-wired text-lg"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold text-slate-900 dark:text-white">平台共享数据源管控</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">在此统一配置向全平台所有用户广播下发的共享节点源与上游数据</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- 范围切换器: 共享源 vs 全量租户源 -->
+        <div class="flex items-center bg-slate-100 dark:bg-slate-700 p-0.5 rounded-lg text-xs">
+          <button @click="switchScope('shared')" 
+                  :class="scope === 'shared' ? 'bg-white dark:bg-slate-600 text-purple-600 dark:text-purple-300 font-bold shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'"
+                  class="px-2.5 py-1.5 rounded-md transition-all cursor-pointer">
+            仅共享源
+          </button>
+          <button @click="switchScope('all')" 
+                  :class="scope === 'all' ? 'bg-white dark:bg-slate-600 text-purple-600 dark:text-purple-300 font-bold shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'"
+                  class="px-2.5 py-1.5 rounded-md transition-all cursor-pointer"
+                  title="租户隔离审计模式：查看系统内所有用户的源归属">
+            全量源 (审计)
+          </button>
+        </div>
+
+        <button @click="fetchSources" :disabled="loading" 
+                class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+          <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': loading}"></i>刷新
+        </button>
+
+        <button @click="openAddModal" 
+                class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-plus"></i>添加平台共享源
+        </button>
+      </div>
+    </div>
+
+    <!-- 提示消息栏 -->
+    <div v-if="message" class="p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 shrink-0 transition-all"
+         :class="isError ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300' : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid" :class="isError ? 'fa-circle-exclamation text-rose-500' : 'fa-circle-check text-emerald-500'"></i>
+        <span>{{ message }}</span>
+      </div>
+      <button @click="message = ''" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- 架构隔离安全提示卡片 -->
+    <div class="p-4 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/50 text-xs text-purple-900 dark:text-purple-200 flex items-start gap-3">
+      <i class="fa-solid fa-shield-halved text-purple-600 dark:text-purple-400 mt-0.5 text-sm shrink-0"></i>
+      <div class="leading-relaxed">
+        <strong>多租户隔离与共享分发设计原则：</strong>
+        在此添加的节点源被标记为 <code class="px-1 py-0.5 bg-purple-100 dark:bg-purple-900 rounded font-mono">is_shared = true</code>，将作为公共基础设施自动广播下发至全平台所有用户的订阅中。普通用户在前台首页添加的数据源严格归该用户私有，绝不在此共享。
+      </div>
+    </div>
+
+    <!-- 列表展示区域 -->
+    <div class="space-y-3">
+      <div v-if="loading && sources.length === 0" class="p-12 text-center text-slate-400 text-sm">
+        <i class="fa-solid fa-circle-notch fa-spin text-2xl text-purple-500 mb-2 block"></i>
+        <span>正在加载上游数据源...</span>
+      </div>
+
+      <div v-else-if="sources.length === 0" class="p-12 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-slate-400 text-sm">
+        暂无已配置的平台共享源，请点击右上角「添加平台共享源」进行录入。
+      </div>
+
+      <div v-else class="grid grid-cols-1 gap-3">
+        <div v-for="src in sources" :key="src.id" 
+             class="p-4 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-750/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all space-y-3">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div class="space-y-1 min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold text-slate-900 dark:text-white text-base">{{ src.name }}</span>
+                <span :class="src.is_shared ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-purple-300 dark:border-purple-800' : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border-sky-300 dark:border-sky-800'"
+                      class="px-2 py-0.5 text-xs font-semibold rounded-md border flex items-center gap-1">
+                  <i class="fa-solid" :class="src.is_shared ? 'fa-globe' : 'fa-user-lock'"></i>
+                  {{ src.is_shared ? '平台公共共享' : `租户私有 [${src.owner_username}]` }}
+                </span>
+                <span :class="src.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800'"
+                      class="px-2 py-0.5 text-xs rounded border font-mono">
+                  {{ src.status === 'healthy' ? '正常' : '异常' }}
+                </span>
+                <span class="text-xs text-slate-500 dark:text-slate-400 font-mono bg-white dark:bg-slate-700 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-600">
+                  {{ src.node_count }} 节点
+                </span>
+                <span v-if="!src.enabled" class="text-xs text-amber-600 dark:text-amber-400 font-medium bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                  已停用
+                </span>
+              </div>
+
+              <div class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate" :title="src.url">
+                {{ maskUrl(src.url) }}
+              </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button @click="refreshSource(src.id)" 
+                      :disabled="refreshingIds.includes(src.id)" 
+                      class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="手动拉取并重新解析节点">
+                <i class="fa-solid fa-rotate-right" :class="{'fa-spin': refreshingIds.includes(src.id)}"></i>
+                <span>刷新</span>
+              </button>
+
+              <button @click="openEditModal(src)" 
+                      class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1 cursor-pointer">
+                <i class="fa-solid fa-pen-to-square"></i>
+                <span>编辑</span>
+              </button>
+
+              <button @click="deleteSource(src)" 
+                      class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 transition-all flex items-center gap-1 cursor-pointer">
+                <i class="fa-solid fa-trash-can"></i>
+                <span>删除</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 底部流量与到期时间统计 -->
+          <div class="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <span v-if="src.traffic_total > 0">
+                已用: <strong class="text-slate-800 dark:text-slate-200 font-mono">{{ formatBytes(src.traffic_used) }}</strong> / {{ formatBytes(src.traffic_total) }}
+              </span>
+              <span v-else>无流量配额上限</span>
+              <span v-if="src.reset_info" class="text-sky-600 dark:text-sky-400">({{ src.reset_info }})</span>
+            </div>
+            <div class="font-mono text-[11px]">
+              最后同步: {{ src.last_sync_at ? formatDate(src.last_sync_at) : '从未' }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加 / 编辑共享源 Modal -->
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl max-w-lg w-full p-6 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+          <h3 class="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+            <i class="fa-solid fa-network-wired text-purple-600 dark:text-purple-400"></i>
+            <span>{{ isEditing ? '编辑数据源' : '新增平台共享数据源' }}</span>
+          </h3>
+          <button @click="showModal = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">源名称 (备注)</label>
+            <input v-model="form.name" type="text" placeholder="例如: 平台主力香港专线 / 美国住宅宽带" 
+                   class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">订阅链接 / 节点协议 URL</label>
+            <input v-model="form.url" type="text" placeholder="https://... 或 ss://..." 
+                   class="w-full px-3 py-2 font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">解析协议格式</label>
+              <select v-model="form.source_type" 
+                      class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option value="auto">自动识别 (Clash YAML / Base64 / URI)</option>
+                <option value="remote_clash">Clash YAML 订阅</option>
+                <option value="remote_base64">Base64 / 节点列表</option>
+                <option value="local_yaml">本地 YAML 内容</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">启用状态</label>
+              <select v-model="form.enabled" 
+                      class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option :value="true">正常启用 (自动接入调度池)</option>
+                <option :value="false">暂停停用 (不参与出站调度)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 共享属性选择 -->
+          <div class="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/40">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input v-model="form.is_shared" type="checkbox" class="w-4 h-4 text-purple-600 rounded">
+              <span class="font-bold text-purple-900 dark:text-purple-200">向全平台所有用户共享下发 (is_shared = true)</span>
+            </label>
+            <p class="text-[11px] text-purple-700/80 dark:text-purple-300/80 mt-1">
+              勾选后，该源下的所有健康节点将自动并入所有用户的专属订阅大盘与出站动态策略组中。
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+          <button @click="showModal = false" class="px-4 py-2 text-xs font-medium rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer">
+            取消
+          </button>
+          <button @click="handleSave" :disabled="saving || !form.name.trim() || !form.url.trim()" 
+                  class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+            <i class="fa-solid fa-check" :class="{'fa-spin': saving}"></i>
+            <span>{{ saving ? '正在同步落库...' : '确认保存' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref, onMounted } from 'vue';
+import { formatBytes, formatDate, maskUrl } from '../utils/format.js';
+
+export default {
+  name: 'AdminSources',
+  props: {
+    currentAdmin: { type: Object, required: true }
+  },
+  setup() {
+    const sources = ref([]);
+    const loading = ref(false);
+    const saving = ref(false);
+    const scope = ref('shared');
+    const message = ref('');
+    const isError = ref(false);
+    const refreshingIds = ref([]);
+
+    const showModal = ref(false);
+    const isEditing = ref(false);
+    const editingId = ref(null);
+    const form = ref({
+      name: '',
+      url: '',
+      source_type: 'auto',
+      enabled: true,
+      is_shared: true
+    });
+
+    const setNotice = (msg, err = false) => {
+      message.value = msg;
+      isError.value = err;
+      if (!err) {
+        setTimeout(() => {
+          if (message.value === msg) message.value = '';
+        }, 5000);
+      }
+    };
+
+    const fetchSources = async () => {
+      loading.value = true;
+      try {
+        const res = await fetch(`/api/admin/sources?scope=${scope.value}`);
+        if (res.ok) {
+          sources.value = await res.json();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setNotice(data.detail || '获取共享数据源失败', true);
+        }
+      } catch (e) {
+        setNotice('网络请求异常，无法加载上游源', true);
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    const switchScope = (newScope) => {
+      scope.value = newScope;
+      fetchSources();
+    };
+
+    const openAddModal = () => {
+      isEditing.value = false;
+      editingId.value = null;
+      form.value = {
+        name: '',
+        url: '',
+        source_type: 'auto',
+        enabled: true,
+        is_shared: true
+      };
+      showModal.value = true;
+    };
+
+    const openEditModal = (src) => {
+      isEditing.value = true;
+      editingId.value = src.id;
+      form.value = {
+        name: src.name,
+        url: src.url,
+        source_type: src.source_type || 'auto',
+        enabled: src.enabled !== false,
+        is_shared: src.is_shared !== false
+      };
+      showModal.value = true;
+    };
+
+    const handleSave = async () => {
+      if (!form.value.name.trim() || !form.value.url.trim()) return;
+      saving.value = true;
+      try {
+        const url = isEditing.value ? `/api/admin/sources/${editingId.value}` : '/api/admin/sources';
+        const method = isEditing.value ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form.value)
+        });
+        if (res.ok) {
+          setNotice(isEditing.value ? '共享源已成功更新！' : '平台共享源已成功创建并完成首次同步！');
+          showModal.value = false;
+          await fetchSources();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setNotice(data.detail || '保存失败', true);
+        }
+      } catch (e) {
+        setNotice('网络异常，保存失败', true);
+      } finally {
+        saving.value = false;
+      }
+    };
+
+    const refreshSource = async (id) => {
+      refreshingIds.value.push(id);
+      try {
+        const res = await fetch(`/api/admin/sources/${id}/refresh`, { method: 'POST' });
+        if (res.ok) {
+          setNotice('源节点已成功刷新并重解析！');
+          await fetchSources();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setNotice(data.detail || '刷新节点失败', true);
+        }
+      } catch (e) {
+        setNotice('网络请求异常，刷新失败', true);
+      } finally {
+        refreshingIds.value = refreshingIds.value.filter(item => item !== id);
+      }
+    };
+
+    const deleteSource = async (src) => {
+      if (!confirm(`确定要彻底删除平台共享源「${src.name}」吗？\n删除后全平台所有用户的对应节点池都将被移除。`)) return;
+      try {
+        const res = await fetch(`/api/admin/sources/${src.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          setNotice(`已成功删除平台共享源「${src.name}」`);
+          await fetchSources();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setNotice(data.detail || '删除失败', true);
+        }
+      } catch (e) {
+        setNotice('网络异常，删除失败', true);
+      }
+    };
+
+    onMounted(() => {
+      fetchSources();
+    });
+
+    return {
+      sources,
+      loading,
+      saving,
+      scope,
+      message,
+      isError,
+      refreshingIds,
+      showModal,
+      isEditing,
+      form,
+      switchScope,
+      fetchSources,
+      openAddModal,
+      openEditModal,
+      handleSave,
+      refreshSource,
+      deleteSource,
+      formatBytes,
+      formatDate,
+      maskUrl
+    };
+  }
+};
+</script>

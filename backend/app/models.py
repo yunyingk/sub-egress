@@ -103,7 +103,7 @@ class Source(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     is_shared = Column(Boolean, default=True, nullable=False)
-    name = Column(String(64), nullable=False, unique=True)
+    name = Column(String(64), nullable=False, index=True)
     code = Column(String(8), default="", nullable=True)
     url = Column(Text, nullable=False)
     source_type = Column(String(32), default="auto")  # auto, remote_clash, remote_base64, local_yaml

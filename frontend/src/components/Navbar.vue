@@ -113,7 +113,7 @@
             <div class="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">系统管理专区</div>
             
             <a href="/admin?tab=users" @click="showUserMenu = false" 
-               class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all cursor-pointer">
+               class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all cursor-pointer">
               <div class="w-7 h-7 rounded-lg bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xs shrink-0">
                 <i class="fa-solid fa-users-gear"></i>
               </div>
@@ -123,8 +123,19 @@
               </div>
             </a>
 
+            <a href="/admin?tab=sources" @click="showUserMenu = false" 
+               class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all cursor-pointer">
+              <div class="w-7 h-7 rounded-lg bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xs shrink-0">
+                <i class="fa-solid fa-network-wired"></i>
+              </div>
+              <div class="text-left flex-1 min-w-0">
+                <div class="font-semibold text-xs text-slate-800 dark:text-slate-100">平台共享数据源</div>
+                <div class="text-[10px] text-slate-400 truncate">配置向全平台广播共享的订阅源与节点</div>
+              </div>
+            </a>
+
             <a href="/admin?tab=rules" @click="showUserMenu = false" 
-               class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all cursor-pointer">
+               class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all cursor-pointer">
               <div class="w-7 h-7 rounded-lg bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xs shrink-0">
                 <i class="fa-solid fa-shield-halved"></i>
               </div>

@@ -1120,6 +1120,174 @@ async def admin_unbind_user_oauth(
     return {"status": "ok", "message": f"用户 {user.username} 的第三方授权已解除"}
 
 
+# ==================== 管理员平台共享源管控 API ====================
+
+class SourceCreate(BaseModel):
+    name: str
+    url: str
+    source_type: str | None = "auto"
+    raw_content: str | None = None
+    is_shared: bool | None = False
+
+class SourceUpdate(BaseModel):
+    name: str | None = None
+    url: str | None = None
+    enabled: bool | None = None
+    raw_content: str | None = None
+    is_shared: bool | None = None
+
+@router.get("/api/admin/sources", summary="管理员获取平台共享源与全量源列表")
+async def admin_list_sources(
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    scope: str = "shared"  # "shared" 或 "all"
+):
+    if scope == "all":
+        stmt = (
+            select(Source, User.username)
+            .outerjoin(User, Source.user_id == User.id)
+            .order_by(Source.is_shared.desc(), Source.id)
+        )
+        res = await db.execute(stmt)
+        rows = res.all()
+        results = []
+        for s, uname in rows:
+            extra = extract_subscription_extra_info(s.raw_content or "")
+            results.append({
+                "id": s.id,
+                "name": s.name,
+                "url": s.url,
+                "source_type": s.source_type,
+                "enabled": s.enabled,
+                "status": s.status,
+                "error_message": s.error_message,
+                "node_count": s.node_count,
+                "traffic_used": s.traffic_used,
+                "traffic_total": s.traffic_total,
+                "is_shared": s.is_shared,
+                "user_id": s.user_id,
+                "owner_username": uname or ("系统平台共享" if s.is_shared else "未知用户"),
+                "can_manage": True,
+                "expire_at": s.expire_at.isoformat() if s.expire_at else None,
+                "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
+                "reset_info": extra.get("reset_info"),
+                "remaining_text": extra.get("remaining_text")
+            })
+        return results
+    else:
+        stmt = select(Source).where(Source.is_shared.is_(True)).order_by(Source.id)
+        res = await db.execute(stmt)
+        sources = res.scalars().all()
+        results = []
+        for s in sources:
+            extra = extract_subscription_extra_info(s.raw_content or "")
+            results.append({
+                "id": s.id,
+                "name": s.name,
+                "url": s.url,
+                "source_type": s.source_type,
+                "enabled": s.enabled,
+                "status": s.status,
+                "error_message": s.error_message,
+                "node_count": s.node_count,
+                "traffic_used": s.traffic_used,
+                "traffic_total": s.traffic_total,
+                "is_shared": True,
+                "user_id": s.user_id,
+                "owner_username": "平台共享",
+                "can_manage": True,
+                "expire_at": s.expire_at.isoformat() if s.expire_at else None,
+                "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
+                "reset_info": extra.get("reset_info"),
+                "remaining_text": extra.get("remaining_text")
+            })
+        return results
+
+@router.post("/api/admin/sources", summary="管理员创建平台共享源")
+async def admin_create_source(
+    payload: SourceCreate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    src = Source(
+        user_id=admin.id,
+        is_shared=True,
+        name=payload.name.strip(),
+        url=payload.url.strip(),
+        source_type=payload.source_type or "auto",
+        raw_content=payload.raw_content
+    )
+    db.add(src)
+    await db.commit()
+    await db.refresh(src)
+    await sync_single_source(src.id, db)
+    return {"status": "success", "id": src.id}
+
+@router.put("/api/admin/sources/{source_id}", summary="管理员编辑共享源")
+async def admin_update_source(
+    source_id: int,
+    payload: SourceUpdate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    stmt = select(Source).where(Source.id == source_id)
+    res = await db.execute(stmt)
+    src = res.scalar_one_or_none()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if payload.name is not None:
+        src.name = payload.name.strip()
+    if payload.url is not None:
+        src.url = payload.url.strip()
+    if payload.enabled is not None:
+        src.enabled = payload.enabled
+    if payload.raw_content is not None:
+        src.raw_content = payload.raw_content
+    if payload.is_shared is not None:
+        src.is_shared = payload.is_shared
+
+    await db.commit()
+    await sync_single_source(src.id, db)
+    return {"status": "success"}
+
+@router.delete("/api/admin/sources/{source_id}", summary="管理员删除共享源")
+async def admin_delete_source(
+    source_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    stmt = select(Source).where(Source.id == source_id)
+    res = await db.execute(stmt)
+    src = res.scalar_one_or_none()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    await db.execute(delete(Source).where(Source.id == source_id))
+    await db.commit()
+    return {"status": "success"}
+
+@router.post("/api/admin/sources/{source_id}/refresh", summary="管理员手动刷新共享源")
+async def admin_refresh_source(
+    source_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    stmt = select(Source).where(Source.id == source_id)
+    res = await db.execute(stmt)
+    src = res.scalar_one_or_none()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    success = await sync_single_source(source_id, db)
+    if not success:
+        res = await db.execute(stmt)
+        src = res.scalar_one_or_none()
+        err = src.error_message if src else "Unknown error"
+        raise HTTPException(status_code=500, detail=f"Refresh failed: {err}")
+    return {"status": "success"}
+
+
 # ==================== 下游订阅分发端点 (多用户订阅隔离与客户端直连) ====================
 
 @router.head("/c/{token}", include_in_schema=False)
@@ -1380,31 +1548,18 @@ async def regenerate_token(
     return {"status": "success", "new_token": new_token}
 
 
-# ==================== 上游源管理 API (供 Web 控制台) ====================
+# ==================== 用户端点：上游节点源管理 API (供首页用户仪表盘) ====================
 
-class SourceCreate(BaseModel):
-    name: str
-    url: str
-    source_type: str | None = "auto"
-    raw_content: str | None = None
-    is_shared: bool | None = True
-
-class SourceUpdate(BaseModel):
-    name: str | None = None
-    url: str | None = None
-    enabled: bool | None = None
-    raw_content: str | None = None
-    is_shared: bool | None = None
-
-@router.get("/api/sources", summary="获取上游源列表")
+@router.get("/api/sources", summary="获取当前用户可用上游源列表")
 async def list_sources(
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).order_by(Source.id)
-    if user and user.role != "admin":
-        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
-
+    stmt = (
+        select(Source)
+        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        .order_by(Source.id)
+    )
     res = await db.execute(stmt)
     sources = res.scalars().all()
     results = []
@@ -1423,6 +1578,7 @@ async def list_sources(
             "traffic_total": s.traffic_total,
             "is_shared": s.is_shared,
             "user_id": s.user_id,
+            "can_manage": (s.user_id == user.id),
             "expire_at": s.expire_at.isoformat() if s.expire_at else None,
             "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
             "reset_info": extra.get("reset_info"),
@@ -1430,16 +1586,16 @@ async def list_sources(
         })
     return results
 
-@router.post("/api/sources", summary="新增上游源")
+@router.post("/api/sources", summary="用户新增个人私有节点源")
 async def create_source(
     payload: SourceCreate,
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    is_shared = payload.is_shared if (user and user.role == "admin") else (user is None)
+    # 用户首页添加的源永远属于该用户专属私有，禁止任何用户在用户页直接添加共享源
     src = Source(
-        user_id=user.id if user else None,
-        is_shared=is_shared,
+        user_id=user.id,
+        is_shared=False,
         name=payload.name.strip(),
         url=payload.url.strip(),
         source_type=payload.source_type or "auto",
@@ -1453,11 +1609,11 @@ async def create_source(
     await sync_single_source(src.id, db)
     return {"status": "success", "id": src.id}
 
-@router.put("/api/sources/{source_id}", summary="编辑上游源")
+@router.put("/api/sources/{source_id}", summary="用户编辑个人私有节点源")
 async def update_source(
     source_id: int,
     payload: SourceUpdate,
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(Source).where(Source.id == source_id)
@@ -1466,8 +1622,10 @@ async def update_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if user and user.role != "admin" and src.user_id != user.id:
-        raise HTTPException(status_code=403, detail="无权修改他人所属的节点源")
+    if src.user_id != user.id:
+        if src.is_shared:
+            raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中编辑维护")
+        raise HTTPException(status_code=403, detail="无权修改他人所属的私有节点源")
 
     if payload.name is not None:
         src.name = payload.name.strip()
@@ -1477,17 +1635,15 @@ async def update_source(
         src.enabled = payload.enabled
     if payload.raw_content is not None:
         src.raw_content = payload.raw_content
-    if payload.is_shared is not None and user and user.role == "admin":
-        src.is_shared = payload.is_shared
 
     await db.commit()
     await sync_single_source(src.id, db)
     return {"status": "success"}
 
-@router.delete("/api/sources/{source_id}", summary="删除上游源")
+@router.delete("/api/sources/{source_id}", summary="用户删除个人私有节点源")
 async def delete_source(
     source_id: int,
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = select(Source).where(Source.id == source_id)
@@ -1496,22 +1652,32 @@ async def delete_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if user and user.role != "admin" and src.user_id != user.id:
-        raise HTTPException(status_code=403, detail="无权删除他人所属的节点源")
+    if src.user_id != user.id:
+        if src.is_shared:
+            raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中删除维护")
+        raise HTTPException(status_code=403, detail="无权删除他人所属的私有节点源")
 
     await db.execute(delete(Source).where(Source.id == source_id))
     await db.commit()
     return {"status": "success"}
 
-@router.post("/api/sources/{source_id}/refresh", summary="手动刷新指定上游源")
+@router.post("/api/sources/{source_id}/refresh", summary="手动刷新指定节点源")
 async def refresh_source(
     source_id: int,
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    stmt = select(Source).where(Source.id == source_id)
+    res = await db.execute(stmt)
+    src = res.scalar_one_or_none()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if src.user_id != user.id and not src.is_shared:
+        raise HTTPException(status_code=403, detail="无权刷新他人所属的私有节点源")
+
     success = await sync_single_source(source_id, db)
     if not success:
-        stmt = select(Source).where(Source.id == source_id)
         res = await db.execute(stmt)
         src = res.scalar_one_or_none()
         err = src.error_message if src else "Unknown error"
@@ -1523,18 +1689,16 @@ async def refresh_source(
 
 @router.get("/api/nodes", summary="获取平铺节点池与动态策略组")
 async def list_nodes(
-    user: Annotated[User | None, Depends(get_current_user_optional)],
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
         .where(Source.enabled.is_(True))
+        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        .order_by(Node.country_code, Node.id)
     )
-    if user and user.role != "admin":
-        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
-
-    stmt = stmt.order_by(Node.country_code, Node.id)
     res = await db.execute(stmt)
     rows = res.all()
 
@@ -1580,8 +1744,17 @@ class BatchPingPayload(BaseModel):
     node_ids: list[int] | None = None
 
 @router.post("/api/nodes/{node_id}/ping", summary="测试单个节点网络握手延迟")
-async def ping_node_endpoint(node_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
-    stmt = select(Node).where(Node.id == node_id)
+async def ping_node_endpoint(
+    node_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    stmt = (
+        select(Node)
+        .join(Source, Node.source_id == Source.id)
+        .where(Node.id == node_id)
+        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+    )
     res = await db.execute(stmt)
     node = res.scalar_one_or_none()
     if not node:
@@ -1602,8 +1775,16 @@ async def ping_node_endpoint(node_id: int, db: Annotated[AsyncSession, Depends(g
     }
 
 @router.post("/api/nodes/ping", summary="批量并发测试节点延迟")
-async def batch_ping_nodes(db: Annotated[AsyncSession, Depends(get_db)], payload: BatchPingPayload | None = None):
-    stmt = select(Node)
+async def batch_ping_nodes(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: BatchPingPayload | None = None
+):
+    stmt = (
+        select(Node)
+        .join(Source, Node.source_id == Source.id)
+        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+    )
     if payload and payload.node_ids:
         stmt = stmt.where(Node.id.in_(payload.node_ids))
     res = await db.execute(stmt)

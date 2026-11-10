@@ -4,6 +4,10 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-bold text-slate-900 dark:text-white text-base">{{ source.name }}</span>
+            <span v-if="source.is_shared" 
+                  class="px-2 py-0.5 text-xs rounded bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-mono font-medium flex items-center gap-1">
+              <i class="fa-solid fa-globe text-[10px]"></i> 平台共享
+            </span>
             <span :class="source.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800'"
                   class="px-2 py-0.5 text-xs rounded border font-mono">
               {{ source.status === 'healthy' ? '正常' : '异常' }}
@@ -21,14 +25,20 @@
           <button @click="$emit('refresh', source.id)" 
                   :disabled="refreshing"
                   title="刷新此源" 
-                  class="p-2 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition disabled:opacity-50">
+                  class="p-2 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition disabled:opacity-50 cursor-pointer">
             <i class="fa-solid fa-rotate-right text-sm" :class="{'fa-spin': refreshing}"></i>
           </button>
-          <button @click="$emit('delete', source.id)" 
-                  title="删除此源" 
-                  class="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+          <button v-if="source.can_manage !== false" 
+                  @click="$emit('delete', source.id)" 
+                  title="删除此个人私有源" 
+                  class="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer">
             <i class="fa-solid fa-trash-can text-sm"></i>
           </button>
+          <div v-else 
+               title="平台公共共享数据源：由系统管理员在管理控制台统一维护" 
+               class="p-2 text-slate-300 dark:text-slate-600 cursor-help">
+            <i class="fa-solid fa-shield-halved text-xs"></i>
+          </div>
         </div>
       </div>
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sub-egress"
-version = "0.4.6"
+version = "0.4.7"
 description = "Modern outbound gateway and multi-core subscription aggregation hub with binary selector design"
 readme = "README.md"
 requires-python = ">=3.14"
