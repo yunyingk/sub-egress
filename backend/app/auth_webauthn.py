@@ -206,7 +206,11 @@ def verify_authentication_assertion(
 
     new_sign_count = int.from_bytes(auth_data[33:37], "big")
 
-    if (new_sign_count or stored_sign_count) and new_sign_count <= stored_sign_count:
+    # W3C WebAuthn Level 3:
+    # 仅当 authenticator 与服务端均维护大于 0 的签名计数器时，才校验计数器单调递增。
+    # 现代跨设备同步通行密钥（如 Apple iCloud 钥匙串、Google 密码管理工具）返回的计数器恒为 0，
+    # 按照标准应当豁免单调递增校验，避免多端同步或无计数器设备验证失败。
+    if new_sign_count > 0 and stored_sign_count > 0 and new_sign_count <= stored_sign_count:
         raise ValueError("WebAuthn signature counter did not increase")
 
     # 签名数据 = authenticatorData + SHA256(clientDataJSON)
@@ -223,4 +227,4 @@ def verify_authentication_assertion(
     else:
         raise ValueError("Unsupported public key type for verification")
 
-    return new_sign_count
+    return new_sign_count if new_sign_count > 0 else stored_sign_count

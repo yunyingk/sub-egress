@@ -64,6 +64,7 @@ def test_authentication_validates_signed_data_and_counter():
 
     assert verify() == 1
     assert verify(counter=0) == 0
+    assert verify(counter=0, stored=1) == 1
     with pytest.raises(ValueError, match="origin"):
         verify(origin="https://other.test")
     with pytest.raises(ValueError, match="RP ID"):
