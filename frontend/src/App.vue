@@ -344,6 +344,16 @@ export default {
           await fetch(`/api/sources/${s.id}/refresh`, { method: 'POST' });
         }
         await Promise.all([fetchSources(), fetchNodes()]);
+        // 自动级联并发测速，让节点大盘即刻显示最新延迟
+        try {
+          await fetch('/api/nodes/ping', {
+            method: 'POST',
+            credentials: 'include'
+          });
+          await fetchNodes();
+        } catch (pingErr) {
+          console.error('Cascade batch ping error', pingErr);
+        }
       } catch (e) {
         console.error('Failed to refresh all', e);
       } finally {
@@ -356,6 +366,10 @@ export default {
       try {
         await fetch(`/api/sources/${id}/refresh`, { method: 'POST' });
         await Promise.all([fetchSources(), fetchNodes()]);
+        // 后端在同步后会触发后台异步测速，延迟 1.5 秒后静默拉取最新测速结果
+        setTimeout(async () => {
+          await fetchNodes();
+        }, 1500);
       } catch (e) {
         console.error(`Failed to refresh source ${id}`, e);
       } finally {

@@ -21,7 +21,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1804,13 +1804,21 @@ async def batch_ping_nodes(
     async def worker(node: Node):
         async with sem:
             res = await ping_single_node(node.server, node.port, node.node_type, timeout=2.5)
-            node.latency = res["latency"]
-            node.latency_status = res["status"]
-            node.latency_updated_at = datetime.now(UTC)
             return node.id, res
 
     tasks = [worker(n) for n in nodes]
     results = await asyncio.gather(*tasks)
+    now = datetime.now(UTC)
+    for nid, ping_res in results:
+        await db.execute(
+            update(Node)
+            .where(Node.id == nid)
+            .values(
+                latency=ping_res["latency"],
+                latency_status=ping_res["status"],
+                latency_updated_at=now
+            )
+        )
     await db.commit()
 
     return {

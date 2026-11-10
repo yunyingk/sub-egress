@@ -6,12 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import AsyncSessionLocal
 from .models import Node, Source
 from .parsers.clash import detect_country, is_residential_node, parse_clash_yaml
+from .parsers.singbox import parse_singbox_json
 from .parsers.uri import parse_subscription_text
 
 DEFAULT_UA = "clash.meta/v1.19.29"
@@ -110,18 +111,23 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
                     if uinfo.get("expire"):
                         source.expire_at = datetime.fromtimestamp(uinfo["expire"], UTC)
 
-        # Try Clash YAML first
+        # Try Clash YAML first, then Sing-box JSON, then URI/Base64
         raw_nodes = parse_clash_yaml(content)
+        if not raw_nodes:
+            raw_nodes = parse_singbox_json(content)
         if not raw_nodes:
             raw_nodes = parse_subscription_text(content)
 
         if not raw_nodes:
             raise ValueError("No valid proxy nodes extracted from payload")
 
-        # Delete existing nodes for this source
-        await session.execute(delete(Node).where(Node.source_id == source.id))
+        # 增量比对更新：保留稳定节点的 ID、历史测速延迟与状态，防止洗成白板或造成并发 StaleDataError
+        existing_res = await session.execute(
+            select(Node).where(Node.source_id == source.id)
+        )
+        existing_nodes = list(existing_res.scalars().all())
+        unmatched_existing = {n.id: n for n in existing_nodes}
 
-        # Insert new parsed nodes with clean concise prefixes [XX]
         source_code = getattr(source, "code", None) or extract_source_code(source.name)
         source.code = source_code
 
@@ -130,22 +136,48 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
             flag, code = detect_country(orig_name)
             is_res = is_residential_node(orig_name, item)
             ntype = str(item.get("type", "unknown"))
-            
+            server = str(item.get("server", ""))
+            port = int(item.get("port", 0))
+
             display_name = format_clean_node_name(source_code, orig_name, flag, is_res, idx, ntype)
 
-            node_rec = Node(
-                source_id=source.id,
-                original_name=orig_name,
-                display_name=display_name,
-                node_type=ntype,
-                server=str(item.get("server", "")),
-                port=int(item.get("port", 0)),
-                country_code=code,
-                country_flag=flag,
-                is_residential=is_res,
-                config_json=item
-            )
-            session.add(node_rec)
+            # 优先精确匹配 (server, port, ntype, orig_name)，其次匹配 (server, port, ntype)
+            matched_node = None
+            for nid, ex in list(unmatched_existing.items()):
+                if ex.server == server and ex.port == port and ex.node_type == ntype and ex.original_name == orig_name:
+                    matched_node = unmatched_existing.pop(nid)
+                    break
+            if not matched_node:
+                for nid, ex in list(unmatched_existing.items()):
+                    if ex.server == server and ex.port == port and ex.node_type == ntype:
+                        matched_node = unmatched_existing.pop(nid)
+                        break
+
+            if matched_node:
+                matched_node.original_name = orig_name
+                matched_node.display_name = display_name
+                matched_node.country_code = code
+                matched_node.country_flag = flag
+                matched_node.is_residential = is_res
+                matched_node.config_json = item
+            else:
+                node_rec = Node(
+                    source_id=source.id,
+                    original_name=orig_name,
+                    display_name=display_name,
+                    node_type=ntype,
+                    server=server,
+                    port=port,
+                    country_code=code,
+                    country_flag=flag,
+                    is_residential=is_res,
+                    config_json=item
+                )
+                session.add(node_rec)
+
+        # 清理上游已下线的历史节点
+        for old_node in unmatched_existing.values():
+            await session.delete(old_node)
 
         source.status = "healthy"
         source.error_message = None
@@ -153,6 +185,9 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
         source.last_sync_at = datetime.now(UTC)
         source.raw_content = content
         await session.commit()
+
+        # 异步触发该源节点的即时后台并发测速
+        asyncio.create_task(ping_source_nodes(source.id))
         return True
 
     except Exception as e:
@@ -207,25 +242,70 @@ async def ping_single_node(host: str, port: int, node_type: str, timeout: float 
     except Exception as e:
         return {"latency": None, "status": "error", "error": str(e)}
 
+async def ping_source_nodes(source_id: int, timeout: float = 2.5, concurrency: int = 20):
+    """针对指定数据源的节点执行后台异步并发测速"""
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Node.id, Node.server, Node.port, Node.node_type).where(Node.source_id == source_id)
+            res = await session.execute(stmt)
+            node_items = res.all()
+            if not node_items:
+                return
+
+            sem = asyncio.Semaphore(concurrency)
+
+            async def worker(nid: int, host: str, port: int, ntype: str):
+                async with sem:
+                    ping_res = await ping_single_node(host, port, ntype, timeout=timeout)
+                    return nid, ping_res
+
+            results = await asyncio.gather(*(worker(nid, s, p, t) for nid, s, p, t in node_items))
+            now = datetime.now(UTC)
+            for nid, ping_res in results:
+                await session.execute(
+                    update(Node)
+                    .where(Node.id == nid)
+                    .values(
+                        latency=ping_res["latency"],
+                        latency_status=ping_res["status"],
+                        latency_updated_at=now
+                    )
+                )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Source nodes ping failed (source_id=%s, error=%s)", source_id, type(exc).__name__)
+
+
 async def ping_all_nodes(timeout: float = 2.5, concurrency: int = 20):
+    """全量节点后台巡检测速，使用原子 update 防范并发 StaleDataError"""
     async with AsyncSessionLocal() as session:
-        stmt = select(Node)
+        stmt = select(Node.id, Node.server, Node.port, Node.node_type)
         res = await session.execute(stmt)
-        nodes = res.scalars().all()
-        if not nodes:
+        node_items = res.all()
+        if not node_items:
             return
 
         sem = asyncio.Semaphore(concurrency)
 
-        async def worker(node: Node):
+        async def worker(nid: int, host: str, port: int, ntype: str):
             async with sem:
-                res = await ping_single_node(node.server, node.port, node.node_type, timeout=timeout)
-                node.latency = res["latency"]
-                node.latency_status = res["status"]
-                node.latency_updated_at = datetime.now(UTC)
+                ping_res = await ping_single_node(host, port, ntype, timeout=timeout)
+                return nid, ping_res
 
-        await asyncio.gather(*(worker(n) for n in nodes))
+        results = await asyncio.gather(*(worker(nid, s, p, t) for nid, s, p, t in node_items))
+        now = datetime.now(UTC)
+        for nid, ping_res in results:
+            await session.execute(
+                update(Node)
+                .where(Node.id == nid)
+                .values(
+                    latency=ping_res["latency"],
+                    latency_status=ping_res["status"],
+                    latency_updated_at=now
+                )
+            )
         await session.commit()
+
 
 async def background_ping_worker():
     # 启动等待 5 秒后执行首次全节点测速巡检，随后每 5 分钟 (300秒) 定时持续更新数据库
