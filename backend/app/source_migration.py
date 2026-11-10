@@ -24,7 +24,7 @@ async def migrate_source_ownership(conn):
         foreign_keys = (await conn.execute(text('PRAGMA foreign_keys'))).scalar_one()
         if foreign_keys:
             raise RuntimeError('SQLite source migration requires foreign_keys disabled during migration')
-        expected = {c.name for c in Source.__table__.columns} - {'owner_user_id', 'created_by_user_id'} | {'user_id'}
+        expected = {c.name for c in Source.__table__.columns} - {'owner_user_id', 'created_by_user_id', 'deleted_at', 'deleted_by_user_id'} | {'user_id'}
         extra = columns - expected
         if extra:
             raise RuntimeError(f"Cannot migrate sources with unrecognized columns: {sorted(extra)}")
@@ -40,7 +40,7 @@ async def migrate_source_ownership(conn):
         ddl = str(CreateTable(Source.__table__).compile(dialect=conn.dialect))
         ddl = ddl.replace('CREATE TABLE sources (', 'CREATE TABLE sources_migration (', 1)
         await conn.execute(text(ddl))
-        names = [c.name for c in Source.__table__.columns if c.name not in {'owner_user_id', 'created_by_user_id'}]
+        names = [c.name for c in Source.__table__.columns if c.name not in {'owner_user_id', 'created_by_user_id', 'deleted_at', 'deleted_by_user_id'}]
         target = ', '.join(f'"{name}"' for name in names)
         await conn.execute(text(
             f'INSERT INTO sources_migration ({target}, owner_user_id, created_by_user_id) '  # noqa: S608 -- static ORM identifiers
@@ -49,7 +49,8 @@ async def migrate_source_ownership(conn):
         await conn.execute(text('DROP TABLE sources'))
         await conn.execute(text('ALTER TABLE sources_migration RENAME TO sources'))
         for index in Source.__table__.indexes:
-            await conn.run_sync(lambda sync, idx=index: idx.create(sync, checkfirst=True))
+            if index.name != 'ix_sources_deleted_at':
+                await conn.run_sync(lambda sync, idx=index: idx.create(sync, checkfirst=True))
     else:
         await conn.execute(text('ALTER TABLE sources ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT'))
         await conn.execute(text('ALTER TABLE sources ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL'))
@@ -58,4 +59,5 @@ async def migrate_source_ownership(conn):
         await conn.execute(text('ALTER TABLE sources ALTER COLUMN is_shared SET NOT NULL'))
         await conn.execute(text('ALTER TABLE sources ADD CONSTRAINT ck_sources_owner_scope CHECK ((is_shared AND owner_user_id IS NULL) OR (NOT is_shared AND owner_user_id IS NOT NULL))'))
         for index in Source.__table__.indexes:
-            await conn.run_sync(lambda sync, idx=index: idx.create(sync, checkfirst=True))
+            if index.name != 'ix_sources_deleted_at':
+                await conn.run_sync(lambda sync, idx=index: idx.create(sync, checkfirst=True))

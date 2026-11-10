@@ -100,6 +100,15 @@ async def init_db():
                 raise RuntimeError("SQLite schema initialization failed") from exc
 
         await migrate_source_ownership(conn)
+        source_columns = await conn.run_sync(
+            lambda sync: {column["name"] for column in inspect(sync).get_columns("sources")}
+        )
+        if "deleted_at" not in source_columns:
+            timestamp_type = "TIMESTAMP" if DATABASE_URL.startswith("sqlite") else "TIMESTAMP WITH TIME ZONE"
+            await conn.execute(text(f"ALTER TABLE sources ADD COLUMN deleted_at {timestamp_type}"))  # noqa: S608
+        if "deleted_by_user_id" not in source_columns:
+            await conn.execute(text("ALTER TABLE sources ADD COLUMN deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sources_deleted_at ON sources (deleted_at)"))
 
     # 管理员初始化与忘记密码检查
     async with AsyncSessionLocal() as session:

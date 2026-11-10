@@ -1,6 +1,7 @@
 import base64
 import copy
 import json
+import re
 import urllib.parse
 from typing import Any
 
@@ -441,6 +442,7 @@ def build_singbox_config(
     """
     outbounds: list[dict[str, Any]] = []
     pass_through_tags: list[str] = []
+    supported_nodes: list[dict[str, Any]] = []
 
     for item in raw_nodes:
         config = item.get("config_json")
@@ -472,6 +474,9 @@ def build_singbox_config(
                 }
             }
         elif ntype == "vless":
+            # Official sing-box has no XHTTP transport; exclude it rather than emit an invalid outbound.
+            if s.get("network") in ("xhttp", "splithttp"):
+                continue
             outbound = {
                 "type": "vless",
                 "tag": tag,
@@ -487,6 +492,8 @@ def build_singbox_config(
                     "insecure": bool(s.get("skip-cert-verify", False))
                 }
                 ropts = s.get("reality-opts")
+                if s.get("client-fingerprint") or ropts:
+                    tls_cfg["utls"] = {"enabled": True, "fingerprint": s.get("client-fingerprint") or "chrome"}
                 if ropts:
                     tls_cfg["reality"] = {
                         "enabled": True,
@@ -496,6 +503,23 @@ def build_singbox_config(
                 outbound["tls"] = tls_cfg
             if s.get("network") and s.get("network") != "tcp":
                 outbound["transport"] = {"type": s.get("network")}
+        elif ntype == "anytls":
+            tls_cfg = {
+                "enabled": True,
+                "server_name": s.get("sni") or s.get("server"),
+                "insecure": bool(s.get("skip-cert-verify", False)),
+            }
+            if s.get("alpn"):
+                tls_cfg["alpn"] = s["alpn"]
+            if s.get("client-fingerprint"):
+                tls_cfg["utls"] = {"enabled": True, "fingerprint": s["client-fingerprint"]}
+            outbound = {
+                "type": "anytls", "tag": tag, "server": s.get("server"),
+                "server_port": int(s.get("port")), "password": s.get("password", ""), "tls": tls_cfg,
+            }
+            for clash_key, sing_key in (("idle-session-check-interval", "idle_session_check_interval"), ("idle-session-timeout", "idle_session_timeout"), ("min-idle-session", "min_idle_session")):
+                if clash_key in s:
+                    outbound[sing_key] = s[clash_key]
         elif ntype in ("hysteria2", "hy2"):
             outbound = {
                 "type": "hysteria2",
@@ -513,9 +537,10 @@ def build_singbox_config(
         if outbound:
             outbounds.append(outbound)
             pass_through_tags.append(tag)
+            supported_nodes.append(item)
 
     # 动态组 (使用统一的 extract_dynamic_groups)
-    dyn_groups = extract_dynamic_groups(raw_nodes)
+    dyn_groups = extract_dynamic_groups(supported_nodes)
     group_outbounds: list[dict[str, Any]] = []
     dyn_tags: list[str] = []
 
@@ -538,15 +563,27 @@ def build_singbox_config(
     }
 
     # 基础出站
-    system_outbounds = [
-        {"type": "direct", "tag": "direct"},
-        {"type": "dns", "tag": "dns-out"},
-        {"type": "block", "tag": "block"}
-    ]
-
+    system_outbounds = [{"type": "direct", "tag": "direct"}]
     all_outbounds = [proxy_selector, *group_outbounds, *outbounds, *system_outbounds]
 
-    route_rules: list[dict[str, Any]] = [{"protocol": "dns", "outbound": "dns-out"}, {"geoip": "private", "outbound": "direct"}]
+    rule_sets: dict[str, dict[str, str]] = {}
+
+    def add_rule_set(kind: str, value: str) -> str | None:
+        name = value.lower()
+        if not re.fullmatch(r"[a-z0-9_-]+", name):
+            return None
+        tag = f"{kind}-{name}"
+        rule_sets[tag] = {
+            "type": "remote", "tag": tag, "format": "binary",
+            "url": f"https://cdn.jsdelivr.net/gh/SagerNet/sing-{kind}@rule-set/{tag}.srs",
+            "download_detour": "PROXY",
+        }
+        return tag
+
+    route_rules: list[dict[str, Any]] = [
+        {"protocol": "dns", "action": "hijack-dns"},
+        {"ip_is_private": True, "outbound": "direct"},
+    ]
     if custom_direct_domains:
         domains = [domain.strip() for domain in custom_direct_domains if domain.strip()]
         if domains:
@@ -555,61 +592,52 @@ def build_singbox_config(
         domains = [domain.strip() for domain in custom_proxy_domains if domain.strip()]
         if domains:
             route_rules.append({"domain_suffix": domains, "outbound": "PROXY"})
-    type_map = {"DOMAIN": "domain", "DOMAIN-SUFFIX": "domain_suffix", "DOMAIN-KEYWORD": "domain_keyword", "IP-CIDR": "ip_cidr", "IP-CIDR6": "ip_cidr", "GEOIP": "geoip", "GEOSITE": "geosite"}
+    type_map = {"DOMAIN": "domain", "DOMAIN-SUFFIX": "domain_suffix", "DOMAIN-KEYWORD": "domain_keyword", "IP-CIDR": "ip_cidr", "IP-CIDR6": "ip_cidr", "GEOIP": "rule_set", "GEOSITE": "rule_set"}
     for raw_rule in custom_rules or []:
         parts = [part.strip() for part in raw_rule.split(",")]
         if len(parts) < 3 or parts[0].upper() not in type_map:
             continue
         rule_type, value, target = parts[0].upper(), parts[1], parts[2]
-        outbound = {"DIRECT": "direct", "REJECT": "block", "PROXY": "PROXY", "__MAIN_PROXY__": "PROXY"}.get(target.upper(), target)
-        route_rules.append({type_map[rule_type]: [value], "outbound": outbound})
+        if rule_type in ("GEOIP", "GEOSITE"):
+            if rule_type == "GEOIP" and value.lower() == "private":
+                match = {"ip_is_private": True}
+            else:
+                tag = add_rule_set(rule_type.lower(), value)
+                if not tag:
+                    continue
+                match = {"rule_set": [tag]}
+        else:
+            match = {type_map[rule_type]: [value]}
+        target_key = target.upper()
+        if target_key == "REJECT":
+            match["action"] = "reject"
+        else:
+            match["outbound"] = {"DIRECT": "direct", "PROXY": "PROXY", "__MAIN_PROXY__": "PROXY"}.get(target_key, target)
+        route_rules.append(match)
+
+    geoip_cn = add_rule_set("geoip", "cn")
+    geosite_cn = add_rule_set("geosite", "cn")
+    route_rules.extend([
+        {"rule_set": [geoip_cn], "outbound": "direct"},
+        {"rule_set": [geosite_cn], "outbound": "direct"},
+    ])
 
     singbox_config = {
-        "log": {
-            "level": "info",
-            "timestamp": True
-        },
+        "log": {"level": "info", "timestamp": True},
         "dns": {
-            "servers": [
-                {
-                    "tag": "dns-remote",
-                    "address": "tls://1.1.1.1",
-                    "address_resolver": "dns-direct"
-                },
-                {
-                    "tag": "dns-direct",
-                    "address": "223.5.5.5",
-                    "detour": "direct"
-                },
-                {
-                    "tag": "dns-block",
-                    "address": "rcode://success"
-                }
-            ],
-            "rules": [
-                {"outbound": "any", "server": "dns-direct"},
-                {"geosite": "cn", "server": "dns-direct"}
-            ],
-            "independent_cache": True
+            "servers": [{"type": "udp", "tag": "dns-direct", "server": "223.5.5.5"}],
+            "final": "dns-direct",
         },
-        "inbounds": [
-            {
-                "type": "mixed",
-                "tag": "mixed-in",
-                "listen": "127.0.0.1",
-                "listen_port": 7890
-            }
-        ],
+        "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890}],
         "outbounds": all_outbounds,
         "route": {
-            "rules": [
-                *route_rules,
-                {"geoip": "cn", "outbound": "direct"},
-                {"geosite": "cn", "outbound": "direct"}
-            ],
+            "rules": route_rules,
+            "rule_set": list(rule_sets.values()),
             "auto_detect_interface": True,
-            "final": "PROXY"
-        }
+            "default_domain_resolver": "dns-direct",
+            "final": "PROXY",
+        },
+        "experimental": {"cache_file": {"enabled": True}},
     }
 
     return json.dumps(singbox_config, ensure_ascii=False, indent=2)
@@ -634,8 +662,26 @@ def build_base64_config(raw_nodes: list[dict[str, Any]]) -> str:
         elif ntype == "trojan":
             uris.append(f"trojan://{s.get('password')}@{s.get('server')}:{s.get('port')}?sni={s.get('sni') or s.get('server')}#{tag_encoded}")
         elif ntype == "vless":
+            if s.get("network") in ("xhttp", "splithttp"):
+                continue
             sec = "reality" if s.get("reality-opts") else ("tls" if s.get("tls") else "none")
             uris.append(f"vless://{s.get('uuid')}@{s.get('server')}:{s.get('port')}?security={sec}&sni={s.get('servername') or s.get('server')}#{tag_encoded}")
+        elif ntype == "anytls":
+            server = str(s.get("server", ""))
+            host = f"[{server}]" if ":" in server and not server.startswith("[") else server
+            password = urllib.parse.quote(str(s.get("password", "")), safe="")
+            params = {}
+            if s.get("sni"):
+                params["sni"] = s["sni"]
+            if s.get("skip-cert-verify"):
+                params["insecure"] = "1"
+            # fp and alpn are widely used extensions to the AnyTLS base URI.
+            if s.get("client-fingerprint"):
+                params["fp"] = s["client-fingerprint"]
+            if s.get("alpn"):
+                params["alpn"] = ",".join(s["alpn"])
+            query = urllib.parse.urlencode(params)
+            uris.append(f"anytls://{password}@{host}:{s.get('port')}/?{query}#{tag_encoded}")
         elif ntype in ("hysteria2", "hy2"):
             uris.append(f"hy2://{s.get('password')}@{s.get('server')}:{s.get('port')}?sni={s.get('sni') or s.get('server')}#{tag_encoded}")
 

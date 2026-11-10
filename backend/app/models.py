@@ -113,6 +113,8 @@ class Source(Base):
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     is_shared = Column(Boolean, default=True, nullable=False)
+    deleted_at = Column(UTCDateTime, nullable=True, index=True)
+    deleted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(64), nullable=False, index=True)
     code = Column(String(8), default="", nullable=True)
     url = Column(Text, nullable=False)

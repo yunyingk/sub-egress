@@ -222,7 +222,7 @@ async def test_admin_shared_sources_management(monkeypatch):
         # 管理员对私有源仅拥有刷新与违规清理删除权限
         await admin_refresh_source(source_id=20, admin=admin, db=db)
         await admin_delete_source(source_id=20, admin=admin, db=db)
-        assert (await db.get(Source, 20)) is None
+        assert (await db.get(Source, 20)).deleted_at is not None
 
         alice_sources = await list_sources(user=alice, db=db)
         assert any(s["id"] == shared_id and s["is_shared"] is True for s in alice_sources)
@@ -237,7 +237,7 @@ async def test_admin_shared_sources_management(monkeypatch):
         assert updated.name == "更新后的共享机场名称"
 
         await admin_delete_source(source_id=shared_id, admin=admin, db=db)
-        assert (await db.get(Source, shared_id)) is None
+        assert (await db.get(Source, shared_id)).deleted_at is not None
 
 
 @pytest.mark.asyncio

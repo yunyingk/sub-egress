@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-10
+
+### Added
+- **AnyTLS**: Import AnyTLS links and Sing-box outbounds, and export Sing-box outbounds and Base64 share links.
+- **Subscription Security**: Add a visible subscription link reset control with confirmation.
+
+### Changed
+- **Source Deletion**: Preserve source and node records in the database while hiding deleted sources from normal operations. Recovery is performed by database operators; no recycle-bin UI is provided.
+- **Sing-box**: Generate one modern configuration using rule actions and remote rule sets. Rule sets are downloaded via the proxy; official 1.12.0 and 1.14.4 clients were tested. XHTTP nodes are omitted where the target format cannot represent them.
+
+### Upgrade
+- Back up the database before upgrading; startup adds soft-deletion columns to sources. First-time Sing-box startup requires a working proxy and access to its rule-set downloads.
+
 ## [0.5.1] - 2026-11-10
 
 ### Fixed

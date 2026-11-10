@@ -430,8 +430,8 @@ export default {
 
     const deleteSource = async (src) => {
       const confirmMsg = src.is_shared
-        ? `确定要彻底删除平台共享源「${src.name}」吗？\n删除后全平台所有用户的对应节点池都将被移除。`
-        : `确定以管理员身份移除租户 [${src.owner_username}] 的私有订阅源「${src.name}」吗？\n此操作将同时清理该源下所有已解析的物理节点。`;
+        ? `确定要删除平台共享源「${src.name}」吗？\n删除后节点不再供用户使用。`
+        : `确定以管理员身份移除租户 [${src.owner_username}] 的私有订阅源「${src.name}」吗？\n删除后节点不再供用户使用。`;
       if (!confirm(confirmMsg)) return;
       try {
         const res = await fetch(`/api/admin/sources/${src.id}`, { method: 'DELETE' });

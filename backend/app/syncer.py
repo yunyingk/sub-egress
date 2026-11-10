@@ -78,7 +78,7 @@ def format_clean_node_name(source_code: str, orig_name: str, flag: str, is_res: 
     return f"[{source_code}] {flag} {base}"
 
 async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     result = await session.execute(stmt)
     source = result.scalar_one_or_none()
     if not source:
@@ -88,11 +88,14 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
     await session.commit()
 
     content = ""
+    userinfo_header = None
     raw_nodes: list[dict[str, Any]] = []
 
     try:
         if source.source_type == "local_yaml" or source.url.startswith("local://"):
             content = source.raw_content or ""
+        elif source.url.startswith("anytls://"):
+            content = source.url
         else:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 resp = await client.get(source.url, headers={"User-Agent": DEFAULT_UA})
@@ -102,14 +105,6 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
                 
                 # Check subscription traffic info header
                 userinfo_header = resp.headers.get("subscription-userinfo") or resp.headers.get("Subscription-Userinfo")
-                if userinfo_header:
-                    uinfo = parse_userinfo_header(userinfo_header)
-                    upload = uinfo.get("upload") or 0
-                    download = uinfo.get("download") or 0
-                    source.traffic_used = upload + download
-                    source.traffic_total = uinfo.get("total") or 0
-                    if uinfo.get("expire"):
-                        source.expire_at = datetime.fromtimestamp(uinfo["expire"], UTC)
 
         # Try Clash YAML first, then Sing-box JSON, then URI/Base64
         raw_nodes = parse_clash_yaml(content)
@@ -120,6 +115,21 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
 
         if not raw_nodes:
             raise ValueError("No valid proxy nodes extracted from payload")
+
+        # Serialize final node writes with deletion; a source may have been deleted during the fetch.
+        source = await session.scalar(
+            select(Source).where(Source.id == source_id, Source.deleted_at.is_(None))
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        if not source:
+            await session.rollback()
+            return False
+        if userinfo_header:
+            uinfo = parse_userinfo_header(userinfo_header)
+            source.traffic_used = (uinfo.get("upload") or 0) + (uinfo.get("download") or 0)
+            source.traffic_total = uinfo.get("total") or 0
+            if uinfo.get("expire"):
+                source.expire_at = datetime.fromtimestamp(uinfo["expire"], UTC)
 
         # 增量比对更新：保留稳定节点的 ID、历史测速延迟与状态，防止洗成白板或造成并发 StaleDataError
         existing_res = await session.execute(
@@ -191,15 +201,17 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
         return True
 
     except Exception as e:
-        source.status = "error"
-        source.error_message = str(e)
-        source.last_sync_at = datetime.now(UTC)
+        await session.rollback()
+        await session.execute(
+            update(Source).where(Source.id == source_id, Source.deleted_at.is_(None))
+            .values(status="error", error_message=str(e), last_sync_at=datetime.now(UTC))
+        )
         await session.commit()
         return False
 
 async def sync_all_sources():
     async with AsyncSessionLocal() as session:
-        stmt = select(Source.id).where(Source.enabled.is_(True))
+        stmt = select(Source.id).where(Source.enabled.is_(True), Source.deleted_at.is_(None))
         result = await session.execute(stmt)
         source_ids = result.scalars().all()
         for sid in source_ids:
@@ -246,7 +258,7 @@ async def ping_source_nodes(source_id: int, timeout: float = 2.5, concurrency: i
     """针对指定数据源的节点执行后台异步并发测速"""
     try:
         async with AsyncSessionLocal() as session:
-            stmt = select(Node.id, Node.server, Node.port, Node.node_type).where(Node.source_id == source_id)
+            stmt = select(Node.id, Node.server, Node.port, Node.node_type).join(Source, Node.source_id == Source.id).where(Node.source_id == source_id, Source.deleted_at.is_(None))
             res = await session.execute(stmt)
             node_items = res.all()
             if not node_items:
@@ -264,7 +276,7 @@ async def ping_source_nodes(source_id: int, timeout: float = 2.5, concurrency: i
             for nid, ping_res in results:
                 await session.execute(
                     update(Node)
-                    .where(Node.id == nid)
+                    .where(Node.id == nid, Node.source.has(Source.deleted_at.is_(None)))
                     .values(
                         latency=ping_res["latency"],
                         latency_status=ping_res["status"],
@@ -279,7 +291,7 @@ async def ping_source_nodes(source_id: int, timeout: float = 2.5, concurrency: i
 async def ping_all_nodes(timeout: float = 2.5, concurrency: int = 20):
     """全量节点后台巡检测速，使用原子 update 防范并发 StaleDataError"""
     async with AsyncSessionLocal() as session:
-        stmt = select(Node.id, Node.server, Node.port, Node.node_type)
+        stmt = select(Node.id, Node.server, Node.port, Node.node_type).join(Source, Node.source_id == Source.id).where(Source.deleted_at.is_(None))
         res = await session.execute(stmt)
         node_items = res.all()
         if not node_items:
@@ -297,7 +309,7 @@ async def ping_all_nodes(timeout: float = 2.5, concurrency: int = 20):
         for nid, ping_res in results:
             await session.execute(
                 update(Node)
-                .where(Node.id == nid)
+                .where(Node.id == nid, Node.source.has(Source.deleted_at.is_(None)))
                 .values(
                     latency=ping_res["latency"],
                     latency_status=ping_res["status"],

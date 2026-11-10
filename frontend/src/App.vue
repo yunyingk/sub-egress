@@ -143,6 +143,7 @@
             :settings="settings"
             v-model:selected-target="selectedTarget"
             @open-settings="showSettingsModal = true"
+            @token-reset="applySubscriptionToken"
           />
         </div>
       </div>
@@ -395,9 +396,10 @@ export default {
     };
 
     const deleteSource = async (id) => {
-      if (!confirm('确定要删除此上游源吗？相关的平铺物理节点也将一并移除。')) return;
+      if (!confirm('删除后此源及其节点将从页面和订阅中移除。确定删除吗？')) return;
       try {
-        await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+        const response = await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('删除失败');
         await Promise.all([fetchSources(), fetchNodes()]);
       } catch (e) {
         console.error(`Failed to delete source ${id}`, e);
@@ -463,6 +465,11 @@ export default {
       } finally {
         savingSettings.value = false;
       }
+    };
+
+    const applySubscriptionToken = (token) => {
+      settings.value.sub_hash_token = token;
+      if (currentUser.value) currentUser.value.sub_hash_token = token;
     };
 
     const handleLogout = async () => {
@@ -536,6 +543,7 @@ export default {
       toggleSharedSource,
       createSource,
       saveSettings,
+      applySubscriptionToken,
       handleLogout
     };
   }

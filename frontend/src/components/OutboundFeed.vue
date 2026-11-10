@@ -138,10 +138,16 @@
             <i class="fa-solid fa-shield-halved text-sky-600 dark:text-sky-400"></i>
             <span>安全令牌: <span class="font-mono font-bold">{{ settings.sub_hash_token ? settings.sub_hash_token.substring(0, 8) + '...' : '未启用' }}</span></span>
           </div>
-          <button @click="$emit('openSettings')" class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
-            设置令牌与分流规则 →
-          </button>
+          <div class="flex items-center gap-3">
+            <button type="button" @click="resetSubscriptionToken" :disabled="resettingToken" class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline disabled:opacity-50">
+              {{ resettingToken ? '重置中…' : '重置订阅链接' }}
+            </button>
+            <button @click="$emit('openSettings')" class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
+              设置分流规则 →
+            </button>
+          </div>
         </div>
+        <p v-if="tokenResetMessage" role="status" class="text-xs" :class="tokenResetError ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'">{{ tokenResetMessage }}</p>
 
         <!-- 规范说明 -->
         <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 space-y-2">
@@ -169,10 +175,33 @@ export default {
     settings: { type: Object, required: true },
     selectedTarget: { type: String, default: 'clash' }
   },
-  emits: ['update:selectedTarget', 'openSettings'],
+  emits: ['update:selectedTarget', 'openSettings', 'tokenReset'],
   setup(props, { emit }) {
     const copied = ref(false);
     const showQr = ref(false);
+    const resettingToken = ref(false);
+    const tokenResetMessage = ref('');
+    const tokenResetError = ref(false);
+
+    const resetSubscriptionToken = async () => {
+      if (resettingToken.value || !window.confirm('重置后旧订阅链接将失效，需要在所有客户端更新链接。确定重置吗？')) return;
+      resettingToken.value = true;
+      tokenResetMessage.value = '';
+      try {
+        const res = await fetch('/api/user/regenerate-token', { method: 'POST' });
+        if (!res.ok) throw new Error('reset failed');
+        const data = await res.json();
+        if (typeof data.new_token !== 'string' || !data.new_token) throw new Error('invalid response');
+        emit('tokenReset', data.new_token);
+        tokenResetError.value = false;
+        tokenResetMessage.value = '订阅链接已重置，请复制新链接并更新客户端。';
+      } catch (e) {
+        tokenResetError.value = true;
+        tokenResetMessage.value = '重置结果未确认，请刷新页面查看当前链接后再重试。';
+      } finally {
+        resettingToken.value = false;
+      }
+    };
     let hoverTimeout = null;
     const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
 
@@ -270,6 +299,10 @@ export default {
     return {
       copied,
       showQr,
+      resettingToken,
+      tokenResetMessage,
+      tokenResetError,
+      resetSubscriptionToken,
       customName,
       onNameChange,
       defaultPlaceholder,

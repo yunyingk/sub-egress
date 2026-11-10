@@ -1311,6 +1311,7 @@ async def admin_list_sources(
             select(Source, User.username, creator.username)
             .outerjoin(User, Source.owner_user_id == User.id)
             .outerjoin(creator, Source.created_by_user_id == creator.id)
+            .where(Source.deleted_at.is_(None))
             .order_by(Source.is_shared.desc(), Source.id)
         )
         res = await db.execute(stmt)
@@ -1343,7 +1344,7 @@ async def admin_list_sources(
             })
         return results
     else:
-        stmt = select(Source, creator.username).outerjoin(creator, Source.created_by_user_id == creator.id).where(Source.is_shared.is_(True)).order_by(Source.id)
+        stmt = select(Source, creator.username).outerjoin(creator, Source.created_by_user_id == creator.id).where(Source.is_shared.is_(True), Source.deleted_at.is_(None)).order_by(Source.id)
         res = await db.execute(stmt)
         results = []
         for s, creator_name in res.all():
@@ -1400,7 +1401,7 @@ async def admin_update_source(
     admin: Annotated[User, Depends(get_current_admin)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
@@ -1435,13 +1436,14 @@ async def admin_delete_source(
     admin: Annotated[User, Depends(get_current_admin)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    await db.execute(delete(Source).where(Source.id == source_id))
+    src.deleted_at = datetime.now(UTC)
+    src.deleted_by_user_id = admin.id
     await db.commit()
     return {"status": "success"}
 
@@ -1451,7 +1453,7 @@ async def admin_refresh_source(
     admin: Annotated[User, Depends(get_current_admin)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
@@ -1516,7 +1518,7 @@ async def export_subscription(
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
-        .where(Source.enabled.is_(True))
+        .where(Source.enabled.is_(True), Source.deleted_at.is_(None))
     )
     if matched_user:
         disabled_shared = matched_user.get_disabled_shared_source_ids()
@@ -1544,7 +1546,7 @@ async def export_subscription(
         nodes_list.append(cfg)
 
     # 计算总流量与到期时间
-    src_stmt = select(Source).where(Source.enabled.is_(True))
+    src_stmt = select(Source).where(Source.enabled.is_(True), Source.deleted_at.is_(None))
     if matched_user:
         src_stmt = src_stmt.where(
             ((Source.is_shared.is_(True)) & (~Source.id.in_(matched_user.get_disabled_shared_source_ids())))
@@ -1756,6 +1758,11 @@ async def probe_subscription_source(
     traffic_total = 0
 
     try:
+        if url.startswith("anytls://"):
+            nodes = parse_subscription_text(url)
+            if not nodes:
+                raise HTTPException(status_code=400, detail="AnyTLS 链接格式无效")
+            return {"success": True, "suggested_name": nodes[0]["name"], "node_count": len(nodes), "source_type": "uri", "traffic_used": 0, "traffic_total": 0}
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(url, headers={"User-Agent": DEFAULT_UA})
             if resp.status_code == 200:
@@ -1805,6 +1812,8 @@ async def probe_subscription_source(
                             source_type = "uri"
                 node_count = len(nodes)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.debug("Probe subscription failed: %s", exc)
 
@@ -1836,6 +1845,7 @@ async def list_sources(
     stmt = (
         select(Source, creator.username)
         .outerjoin(creator, Source.created_by_user_id == creator.id)
+        .where(Source.deleted_at.is_(None))
         .where(
             ((Source.is_shared.is_(True)) & (Source.enabled.is_(True)))
             | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
@@ -1881,7 +1891,7 @@ async def toggle_shared_source_for_user(
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     src = await db.get(Source, source_id)
-    if not src or not src.is_shared or not src.enabled:
+    if not src or src.deleted_at is not None or not src.is_shared or not src.enabled:
         raise HTTPException(status_code=404, detail="平台共享源不存在")
 
     disabled_ids = user.get_disabled_shared_source_ids()
@@ -1932,7 +1942,7 @@ async def update_source(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
@@ -1963,7 +1973,7 @@ async def delete_source(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
@@ -1975,7 +1985,8 @@ async def delete_source(
     if src.owner_user_id != user.id:
         raise HTTPException(status_code=403, detail="无权删除他人所属的私有节点源")
 
-    await db.execute(delete(Source).where(Source.id == source_id))
+    src.deleted_at = datetime.now(UTC)
+    src.deleted_by_user_id = user.id
     await db.commit()
     return {"status": "success"}
 
@@ -1985,7 +1996,7 @@ async def refresh_source(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(Source).where(Source.id == source_id)
+    stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
     res = await db.execute(stmt)
     src = res.scalar_one_or_none()
     if not src:
@@ -2017,7 +2028,7 @@ async def list_nodes(
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
-        .where(Source.enabled.is_(True))
+        .where(Source.enabled.is_(True), Source.deleted_at.is_(None))
     )
     if disabled_shared:
         stmt = stmt.where(
@@ -2080,7 +2091,7 @@ async def ping_node_endpoint(
     stmt = (
         select(Node)
         .join(Source, Node.source_id == Source.id)
-        .where(Node.id == node_id, Source.enabled.is_(True))
+        .where(Node.id == node_id, Source.enabled.is_(True), Source.deleted_at.is_(None))
         .where(
             ((Source.is_shared.is_(True)) & (~Source.id.in_(user.get_disabled_shared_source_ids())))
             | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
@@ -2115,7 +2126,7 @@ async def batch_ping_nodes(
     stmt = (
         select(Node)
         .join(Source, Node.source_id == Source.id)
-        .where(Source.enabled.is_(True))
+        .where(Source.enabled.is_(True), Source.deleted_at.is_(None))
     )
     if disabled_shared:
         stmt = stmt.where(

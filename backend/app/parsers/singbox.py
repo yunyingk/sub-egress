@@ -115,6 +115,22 @@ def parse_singbox_json(content: str) -> list[dict[str, Any]]:
                 if tls_cfg.get("insecure"):
                     proxy_dict["skip-cert-verify"] = True
 
+        elif ob_type == "anytls":
+            proxy_dict["type"] = "anytls"
+            proxy_dict["password"] = str(ob.get("password", ""))
+            if tls_cfg.get("server_name"):
+                proxy_dict["sni"] = tls_cfg["server_name"]
+            if tls_cfg.get("insecure"):
+                proxy_dict["skip-cert-verify"] = True
+            if tls_cfg.get("alpn"):
+                proxy_dict["alpn"] = tls_cfg["alpn"]
+            utls = tls_cfg.get("utls", {})
+            if isinstance(utls, dict) and utls.get("enabled") and utls.get("fingerprint"):
+                proxy_dict["client-fingerprint"] = utls["fingerprint"]
+            for clash_key, sing_key in (("idle-session-check-interval", "idle_session_check_interval"), ("idle-session-timeout", "idle_session_timeout"), ("min-idle-session", "min_idle_session")):
+                if sing_key in ob:
+                    proxy_dict[clash_key] = ob[sing_key]
+
         elif ob_type in ("hysteria2", "hy2"):
             proxy_dict["type"] = "hysteria2"
             proxy_dict["password"] = str(ob.get("password", ""))

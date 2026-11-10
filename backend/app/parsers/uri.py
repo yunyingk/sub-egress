@@ -142,6 +142,30 @@ def parse_hysteria2(url: str) -> dict[str, Any] | None:
     except Exception:
         return None
 
+def parse_anytls(url: str) -> dict[str, Any] | None:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if not parsed.hostname or not parsed.username:
+            return None
+        qs = urllib.parse.parse_qs(parsed.query)
+        proxy: dict[str, Any] = {
+            "name": urllib.parse.unquote(parsed.fragment) or "AnyTLS",
+            "type": "anytls", "server": parsed.hostname, "port": parsed.port or 443,
+            "password": urllib.parse.unquote(parsed.username), "udp": True,
+        }
+        if qs.get("sni"):
+            proxy["sni"] = qs["sni"][0]
+        if qs.get("insecure"):
+            proxy["skip-cert-verify"] = qs["insecure"][0].lower() in ("1", "true")
+        if qs.get("fp"):
+            proxy["client-fingerprint"] = qs["fp"][0]
+        if qs.get("alpn"):
+            proxy["alpn"] = [value for value in qs["alpn"][0].split(",") if value]
+        return proxy
+    except (ValueError, TypeError):
+        return None
+
+
 def parse_uri(line: str) -> dict[str, Any] | None:
     line = line.strip()
     if not line:
@@ -154,12 +178,14 @@ def parse_uri(line: str) -> dict[str, Any] | None:
         return parse_trojan(line)
     elif line.startswith("hysteria2://") or line.startswith("hy2://"):
         return parse_hysteria2(line)
+    elif line.startswith("anytls://"):
+        return parse_anytls(line)
     return None
 
 def parse_subscription_text(text: str) -> list[dict[str, Any]]:
     # Attempt base64 decode if lines look like base64 blob
     decoded = safe_b64decode(text)
-    content = decoded if decoded and ("vmess://" in decoded or "vless://" in decoded or "ss://" in decoded or "trojan://" in decoded) else text
+    content = decoded if decoded and ("vmess://" in decoded or "vless://" in decoded or "ss://" in decoded or "trojan://" in decoded or "anytls://" in decoded) else text
     
     results = []
     for line in content.splitlines():
