@@ -72,7 +72,7 @@ docker run -d \
   -p 8000:8000 \
   -v ./data:/data \
   --restart unless-stopped \
-  yunyingk/sub-egress:latest
+  ghcr.io/yunyingk/sub-egress:latest
 
 # 查看初始密码
 docker logs sub-egress

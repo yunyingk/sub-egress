@@ -1,6 +1,6 @@
 services:
   sub-egress:
-    image: yunyingk/sub-egress:latest
+    image: ghcr.io/yunyingk/sub-egress:latest
     build:
       context: .
       dockerfile: Dockerfile
