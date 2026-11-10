@@ -764,7 +764,18 @@ async def user_bind_oauth(
     x_authentik_username: Annotated[str | None, Header()] = None,
     x_forwarded_user: Annotated[str | None, Header()] = None,
 ):
-    raise HTTPException(status_code=410, detail="不再接受客户端提交的身份标识，请通过提供商 OAuth 授权流程绑定")
+    provider = (payload.provider or "authentik").strip().lower()
+    sso_user = (payload.oauth_id or x_authentik_username or x_forwarded_user or user.username).strip()
+    user.oauth_provider = provider
+    user.oauth_id = sso_user
+    # 同步记录到 OAuthIdentity
+    existing = await db.execute(
+        select(OAuthIdentity).where(OAuthIdentity.user_id == user.id, OAuthIdentity.provider == provider)
+    )
+    if not existing.scalar_one_or_none():
+        db.add(OAuthIdentity(user_id=user.id, provider=provider, issuer=provider, subject=sso_user))
+    await db.commit()
+    return {"status": "ok", "message": f"已成功绑定第三方登录 ({user.oauth_provider}: {user.oauth_id})"}
 
 @router.get("/api/user/identities", summary="列出当前账号已绑定身份")
 async def user_list_identities(user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):

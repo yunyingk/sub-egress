@@ -120,10 +120,10 @@
                   </div>
                 </div>
 
-                <div class="relative inline-block self-end sm:self-center">
+                <div class="relative inline-block self-end sm:self-center shrink-0">
                   <button @click.stop="toggleConfirm(`pk-${pk.id}`, `确定要解绑通行密钥【${pk.name}】吗？解绑后将无法使用该设备免密登录。`, () => deletePasskey(pk.id, pk.name))"
-                          class="px-2.5 py-1 text-xs text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-all cursor-pointer">
-                    <i class="fa-regular fa-trash-can mr-1"></i>解绑
+                          class="px-2.5 py-1 text-xs text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1">
+                    <i class="fa-regular fa-trash-can"></i><span>解绑</span>
                   </button>
                   <div v-if="activeConfirm && activeConfirm.id === `pk-${pk.id}`"
                        @click.stop
@@ -187,14 +187,35 @@
         </form>
 
         <!-- 页签 3: 第三方登录绑定与解绑 (Authentik SSO) -->
+        <!-- 页签 3: 第三方登录绑定 (GitHub 身份与 Authentik SSO) -->
         <div v-else-if="activeTab === 'oauth'" class="space-y-4">
+          <!-- 卡片 1: GitHub 外部身份 -->
           <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-            <h4 class="font-bold text-sm mb-3">已绑定的外部身份</h4>
-            <p v-if="identities.length === 0" class="text-xs text-slate-500">尚未绑定 GitHub 身份</p>
-            <div v-for="identity in identities" :key="identity.id" class="flex items-center justify-between py-2 border-t text-sm">
-              <span><i class="fa-brands fa-github mr-2"></i>{{ identity.provider }} · {{ identity.subject }}</span>
-              <div class="relative inline-block">
-                <button class="text-rose-600 text-xs hover:underline cursor-pointer"
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 flex items-center justify-center text-lg">
+                  <i class="fa-brands fa-github"></i>
+                </div>
+                <div>
+                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">GitHub 身份绑定</h4>
+                  <p class="text-[11px] text-slate-400">绑定 GitHub 账号一键快捷登录</p>
+                </div>
+              </div>
+              <div>
+                <span v-if="identities.length" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                  <i class="fa-solid fa-check text-[10px]"></i>已绑定 ({{ identities.length }})
+                </span>
+                <span v-else class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
+                  未绑定
+                </span>
+              </div>
+            </div>
+
+            <p v-if="identities.length === 0" class="text-xs text-slate-500 mb-2">尚未绑定 GitHub 身份</p>
+            <div v-for="identity in identities" :key="identity.id" class="flex items-center justify-between py-2 border-t border-slate-100 dark:border-slate-700 text-sm">
+              <span class="font-mono text-xs text-slate-700 dark:text-slate-300"><i class="fa-brands fa-github mr-2"></i>{{ identity.provider }} · ID: {{ identity.subject }}</span>
+              <div class="relative inline-block shrink-0">
+                <button class="text-rose-600 text-xs hover:underline cursor-pointer whitespace-nowrap"
                         @click.stop="toggleConfirm(`id-${identity.id}`, `确定要解绑外部身份 [${identity.provider}] 吗？`, () => unlinkIdentity(identity.id))">
                   解绑
                 </button>
@@ -212,8 +233,15 @@
                 </div>
               </div>
             </div>
-            <a href="/api/auth/github/start?mode=link" class="inline-flex mt-3 px-3 py-2 rounded-lg bg-slate-900 text-white text-xs"><i class="fa-brands fa-github mr-2"></i>绑定 GitHub 账号</a>
+            <div class="pt-2">
+              <a href="/api/auth/github/start?mode=link" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-all">
+                <i class="fa-brands fa-github"></i>
+                <span>绑定 GitHub 账号</span>
+              </a>
+            </div>
           </div>
+
+          <!-- 卡片 2: Authentik 单点登录 (SSO) -->
           <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/30">
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-2.5">
@@ -221,8 +249,8 @@
                   <i class="fa-solid fa-id-card-clip"></i>
                 </div>
                 <div>
-                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">外部身份绑定</h4>
-                  <p class="text-[11px] text-slate-400">支持 Authentik 和 GitHub 身份</p>
+                  <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">Authentik 单点登录 (SSO)</h4>
+                  <p class="text-[11px] text-slate-400">通过统一身份网关直接授权登录</p>
                 </div>
               </div>
               <div>
@@ -243,10 +271,10 @@
               </div>
               <div class="flex items-center justify-between pt-1">
                 <span class="text-[11px] text-slate-400">若解绑，将无法直接通过 SSO 免密进入此账号</span>
-                <div class="relative inline-block">
+                <div class="relative inline-block shrink-0">
                   <button @click.stop="toggleConfirm('oauth', '确定要解除第三方登录绑定吗？解除后将无法再通过 SSO 免密进入此账号。', handleUnbindOAuth)"
                           :disabled="loading"
-                          class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg transition-all cursor-pointer disabled:opacity-50">
+                          class="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg transition-all cursor-pointer whitespace-nowrap disabled:opacity-50">
                     <i v-if="loading" class="fa-solid fa-circle-notch fa-spin mr-1"></i>
                     <i v-else class="fa-solid fa-link-slash mr-1"></i>解除绑定
                   </button>
@@ -272,10 +300,12 @@
                 绑定后，您可以在登录页面直接点击“第三方登录”，通过 Authentik 单点登录直接进入当前用户。
               </div>
               <div class="flex items-center justify-end pt-1">
-                  <a href="/api/auth/github/start?mode=link"
+                <button type="button" @click="handleBindOAuth" :disabled="loading"
                         class="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
-                  <i class="fa-brands fa-github"></i><span>绑定 GitHub</span>
-                </a>
+                  <i v-if="loading" class="fa-solid fa-circle-notch fa-spin"></i>
+                  <i v-else class="fa-solid fa-link"></i>
+                  <span>重新绑定 Authentik</span>
+                </button>
               </div>
             </div>
           </div>
