@@ -94,3 +94,41 @@ async def test_incremental_sync_preserves_latency(monkeypatch):
         assert nodes[1].id != original_node_id
         assert nodes[1].server == "2.2.2.2"
         assert nodes[1].latency is None
+
+
+@pytest.mark.asyncio
+async def test_sync_corrects_country_and_preserves_node_identity(monkeypatch):
+    await init_db()
+
+    async def noop_ping(sid):
+        pass
+
+    monkeypatch.setattr("app.syncer.ping_source_nodes", noop_ping)
+    async with AsyncSessionLocal() as session:
+        source = Source(
+            name="Country Test",
+            url="local://country-test",
+            source_type="local_yaml",
+            is_shared=True,
+            raw_content='''{"outbounds": [
+                {"type":"vless", "tag":"🇺🇸 Australia-01", "server":"1.1.1.1", "server_port":443, "uuid":"test"},
+                {"type":"vless", "tag":"🇺🇸 Russia-01", "server":"2.2.2.2", "server_port":443, "uuid":"test"}
+            ]}''',
+        )
+        session.add(source)
+        await session.flush()
+        session.add(Node(source_id=source.id, original_name="🇺🇸 Australia-01", display_name="old",
+                         server="1.1.1.1", port=443, node_type="vless", country_code="US",
+                         country_flag="🇺🇸", latency=123.4, config_json={}))
+        await session.commit()
+        source_id = source.id
+        old_node_id = (await session.execute(select(Node.id).where(Node.source_id == source_id))).scalar_one()
+
+        assert await sync_single_source(source_id, session)
+        nodes = (await session.execute(select(Node).where(Node.source_id == source_id))).scalars().all()
+        by_name = {node.original_name: node for node in nodes}
+        assert by_name["🇺🇸 Australia-01"].country_code == "AU"
+        assert by_name["🇺🇸 Australia-01"].country_flag == "🇦🇺"
+        assert by_name["🇺🇸 Australia-01"].id == old_node_id
+        assert by_name["🇺🇸 Australia-01"].latency == 123.4
+        assert by_name["🇺🇸 Russia-01"].country_code == "RU"

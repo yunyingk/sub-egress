@@ -14,7 +14,7 @@ COUNTRY_PATTERNS: list[tuple[str, str, str]] = [
     ("🇯🇵", "JP", r"日本|japan|jp|tokyo|osaka"),
     ("🇨🇳", "TW", r"台湾|taiwan|tw|taipei"),
     ("🇸🇬", "SG", r"新加坡|singapore|sg"),
-    ("🇺🇸", "US", r"美国|united states|usa|us|america|los angeles|new york"),
+    ("🇺🇸", "US", r"美国|united states|usa|us|u\.s\.|america|los angeles|new york"),
     ("🇰🇷", "KR", r"韩国|korea|kr|seoul"),
     ("🇬🇧", "GB", r"英国|united kingdom|uk|london"),
     ("🇩🇪", "DE", r"德国|germany|de|frankfurt"),
@@ -49,8 +49,19 @@ def is_ad_node(name: str) -> bool:
 def detect_country(name: str) -> tuple[str, str]:
     if not name:
         return "🌐", "OTHER"
-    for flag, code, pattern in COUNTRY_PATTERNS:
-        if re.search(pattern, name, re.IGNORECASE) or flag in name:
+    # 完整地名优先于缩写，二者都优先于可能与实际地点不一致的国旗。
+    for abbreviations in (False, True):
+        for flag, code, pattern in COUNTRY_PATTERNS:
+            for keyword in pattern.split("|"):
+                is_abbreviation = keyword.isascii() and len(keyword.replace("\\", "")) <= 4
+                if is_abbreviation != abbreviations:
+                    continue
+                # 英文关键词不能命中其他英文单词的内部，如 Australia 中的 us。
+                expression = rf"(?<![a-z])(?:{keyword})(?![a-z])" if keyword.isascii() else keyword
+                if re.search(expression, name, re.IGNORECASE):
+                    return flag, code
+    for flag, code, _pattern in COUNTRY_PATTERNS:
+        if flag in name:
             return flag, code
     return "🌐", "OTHER"
 
