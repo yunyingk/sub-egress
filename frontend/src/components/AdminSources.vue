@@ -167,15 +167,36 @@
 
         <div class="space-y-4 text-xs">
           <div>
-            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">源名称 (备注)</label>
-            <input v-model="form.name" type="text" placeholder="例如: 平台主力香港专线 / 美国住宅宽带" 
-                   class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+              <span>订阅链接 / 节点协议 URL</span>
+              <span v-if="isProbing" class="text-purple-600 dark:text-purple-400 text-[10px] font-normal flex items-center gap-1">
+                <i class="fa-solid fa-spinner fa-spin"></i> 正在智能探测名称与节点...
+              </span>
+            </label>
+            <input v-model="form.url" 
+                   @blur="triggerProbe"
+                   type="text" 
+                   placeholder="https://... 或 ss://... (粘贴后自动识别名称)" 
+                   class="w-full px-3 py-2 font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+            
+            <div v-if="probeInfo" class="mt-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+              <span class="flex items-center gap-1.5 truncate">
+                <i class="fa-solid fa-circle-check text-emerald-500 shrink-0"></i>
+                <span class="truncate">已自动识别: <strong>{{ probeInfo.suggested_name }}</strong></span>
+              </span>
+              <span class="font-mono text-[10px] shrink-0 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded font-bold">
+                {{ probeInfo.node_count }} 节点
+              </span>
+            </div>
           </div>
 
           <div>
-            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">订阅链接 / 节点协议 URL</label>
-            <input v-model="form.url" type="text" placeholder="https://... 或 ss://..." 
-                   class="w-full px-3 py-2 font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+              源名称 (备注)
+              <span class="text-[10px] font-normal text-slate-400">(填入链接后自动填入，亦可手动修改)</span>
+            </label>
+            <input v-model="form.name" type="text" placeholder="例如: 平台主力香港专线 / 美国住宅宽带" 
+                   class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
           </div>
 
           <div class="grid grid-cols-2 gap-4">
@@ -223,7 +244,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { formatBytes, formatDate, maskUrl } from '../utils/format.js';
 
 export default {
@@ -243,12 +264,59 @@ export default {
     const showModal = ref(false);
     const isEditing = ref(false);
     const editingId = ref(null);
+    const isProbing = ref(false);
+    const probeInfo = ref(null);
+    let probeTimer = null;
+    let autoFilledName = '';
+
     const form = ref({
       name: '',
       url: '',
       source_type: 'auto',
       enabled: true,
       is_shared: true
+    });
+
+    const triggerProbe = async () => {
+      const targetUrl = (form.value.url || '').trim();
+      if (!targetUrl || targetUrl.length < 8) return;
+      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) return;
+
+      isProbing.value = true;
+      try {
+        const resp = await fetch('/api/sources/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ url: targetUrl })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          probeInfo.value = data;
+          if (data.suggested_name) {
+            if (!form.value.name.trim() || form.value.name === autoFilledName) {
+              form.value.name = data.suggested_name;
+              autoFilledName = data.suggested_name;
+            }
+          }
+        }
+      } catch (err) {
+        console.debug('Probe subscription error', err);
+      } finally {
+        isProbing.value = false;
+      }
+    };
+
+    watch(() => form.value.url, (newVal) => {
+      if (isEditing.value) return;
+      if (probeTimer) clearTimeout(probeTimer);
+      if (!newVal || newVal.trim().length < 10) {
+        probeInfo.value = null;
+        return;
+      }
+      probeTimer = setTimeout(() => {
+        triggerProbe();
+      }, 500);
     });
 
     const setNotice = (msg, err = false) => {
@@ -286,6 +354,8 @@ export default {
     const openAddModal = () => {
       isEditing.value = false;
       editingId.value = null;
+      probeInfo.value = null;
+      autoFilledName = '';
       form.value = {
         name: '',
         url: '',
@@ -390,6 +460,9 @@ export default {
       refreshingIds,
       showModal,
       isEditing,
+      isProbing,
+      probeInfo,
+      triggerProbe,
       form,
       switchScope,
       fetchSources,

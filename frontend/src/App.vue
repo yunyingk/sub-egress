@@ -121,6 +121,7 @@
             @open-add-modal="showAddModal = true"
             @refresh-source="refreshSource"
             @delete-source="deleteSource"
+            @toggle-shared-source="toggleSharedSource"
           />
         </div>
 
@@ -387,6 +388,20 @@ export default {
       }
     };
 
+    const toggleSharedSource = async (id) => {
+      try {
+        const res = await fetch(`/api/user/shared-sources/${id}/toggle`, {
+          method: 'POST',
+          credentials: 'include'
+        });
+        if (res.ok) {
+          await Promise.all([fetchSources(), fetchNodes()]);
+        }
+      } catch (e) {
+        console.error('Failed to toggle shared source', e);
+      }
+    };
+
     const createSource = async (formData) => {
       creatingSource.value = true;
       try {
@@ -476,6 +491,7 @@ export default {
       refreshAll,
       refreshSource,
       deleteSource,
+      toggleSharedSource,
       createSource,
       saveSettings,
       handleLogout

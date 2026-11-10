@@ -55,6 +55,7 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_proxy_domains TEXT DEFAULT '';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_rules TEXT DEFAULT '';"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_shared_sources TEXT DEFAULT '';"))
         else:
             # SQLite 增补字段检测
             try:
@@ -84,6 +85,8 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE users ADD COLUMN custom_proxy_domains TEXT DEFAULT '';"))
                 if "custom_rules" not in u_cols:
                     await conn.execute(text("ALTER TABLE users ADD COLUMN custom_rules TEXT DEFAULT '';"))
+                if "disabled_shared_sources" not in u_cols:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN disabled_shared_sources TEXT DEFAULT '';"))
             except Exception as exc:
                 raise RuntimeError("SQLite schema initialization failed") from exc
 

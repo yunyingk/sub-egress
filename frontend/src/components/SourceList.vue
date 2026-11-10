@@ -24,6 +24,7 @@
           :refreshing="refreshingIds.includes(src.id)"
           @refresh="$emit('refreshSource', $event)"
           @delete="$emit('deleteSource', $event)"
+          @toggle-shared="$emit('toggleSharedSource', $event)"
         />
       </div>
     </div>
@@ -42,6 +43,6 @@ export default {
     sources: { type: Array, required: true },
     refreshingIds: { type: Array, default: () => [] }
   },
-  emits: ['openAddModal', 'refreshSource', 'deleteSource']
+  emits: ['openAddModal', 'refreshSource', 'deleteSource', 'toggleSharedSource']
 };
 </script>

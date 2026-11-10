@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import logging
 import os
+import re
 import secrets
 import time
 import urllib.parse
@@ -40,7 +42,9 @@ from .builder import (
 )
 from .db import get_db
 from .models import Node, OAuthIdentity, PasskeyCredential, Setting, Source, User
-from .parsers.clash import extract_subscription_extra_info
+from .parsers.clash import extract_subscription_extra_info, parse_clash_yaml
+from .parsers.singbox import parse_singbox_json
+from .parsers.uri import parse_subscription_text
 from .security import (
     create_session_token,
     generate_secure_password,
@@ -50,8 +54,15 @@ from .security import (
     verify_password,
     verify_session_token,
 )
-from .syncer import ping_single_node, sync_single_source
+from .syncer import (
+    DEFAULT_UA,
+    parse_userinfo_header,
+    ping_single_node,
+    sync_single_source,
+)
 from .version import VERSION
+
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
@@ -1344,14 +1355,21 @@ async def export_subscription(
     else:
         final_target = "clash"
 
-    # 多租户节点源过滤：提取公共共享源 + 用户私有源
+    # 多租户节点源过滤：提取公共共享源（排除用户个人禁用的共享源）+ 用户私有源
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
         .where(Source.enabled.is_(True))
     )
     if matched_user:
-        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
+        disabled_shared = matched_user.get_disabled_shared_source_ids()
+        if disabled_shared:
+            stmt = stmt.where(
+                ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
+                | (Source.user_id == matched_user.id)
+            )
+        else:
+            stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
     else:
         stmt = stmt.where(Source.is_shared.is_(True))
 
@@ -1559,6 +1577,96 @@ async def regenerate_token(
 
 # ==================== 用户端点：上游节点源管理 API (供首页用户仪表盘) ====================
 
+class ProbeSourcePayload(BaseModel):
+    url: str
+
+@router.post("/api/sources/probe", summary="智能探测订阅链接名称与节点信息")
+async def probe_subscription_source(
+    payload: ProbeSourcePayload,
+    user: Annotated[User, Depends(get_current_user)],
+):
+    url = (payload.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="订阅 URL 不能为空")
+
+    suggested_name = ""
+    node_count = 0
+    source_type = "auto"
+    traffic_used = 0
+    traffic_total = 0
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": DEFAULT_UA})
+            if resp.status_code == 200:
+                # 1. 尝试从 Profile-Title 响应头解析
+                pt = resp.headers.get("profile-title") or resp.headers.get("Profile-Title")
+                if pt:
+                    pt = pt.strip()
+                    if pt.startswith("base64:"):
+                        try:
+                            suggested_name = base64.b64decode(pt[7:]).decode("utf-8", errors="ignore").strip()
+                        except Exception as exc:
+                            logger.debug("Failed to decode base64 profile-title: %s", exc)
+                    else:
+                        suggested_name = urllib.parse.unquote(pt).strip()
+
+                # 2. 尝试从 Content-Disposition 响应头解析
+                if not suggested_name:
+                    cd = resp.headers.get("content-disposition") or resp.headers.get("Content-Disposition")
+                    if cd:
+                        m_utf8 = re.search(r"filename\*=UTF-8''([^;]+)", cd, re.IGNORECASE)
+                        if m_utf8:
+                            suggested_name = urllib.parse.unquote(m_utf8.group(1)).strip()
+                        else:
+                            m_std = re.search(r'filename="?([^";]+)"?', cd)
+                            if m_std:
+                                suggested_name = urllib.parse.unquote(m_std.group(1)).strip()
+
+                # 3. 提取流量信息
+                userinfo_header = resp.headers.get("subscription-userinfo") or resp.headers.get("Subscription-Userinfo")
+                if userinfo_header:
+                    uinfo = parse_userinfo_header(userinfo_header)
+                    traffic_used = (uinfo.get("upload") or 0) + (uinfo.get("download") or 0)
+                    traffic_total = uinfo.get("total") or 0
+
+                # 4. 解析节点数量与格式
+                content = resp.text
+                nodes = parse_clash_yaml(content)
+                if nodes:
+                    source_type = "clash"
+                else:
+                    nodes = parse_singbox_json(content)
+                    if nodes:
+                        source_type = "singbox"
+                    else:
+                        nodes = parse_subscription_text(content)
+                        if nodes:
+                            source_type = "uri"
+                node_count = len(nodes)
+
+    except Exception as exc:
+        logger.debug("Probe subscription failed: %s", exc)
+
+    # 5. 若无响应头名称，从 URL 域名提取友好默认名称
+    if not suggested_name:
+        parsed_url = urllib.parse.urlparse(url)
+        host = parsed_url.hostname or ""
+        parts = [p.upper() for p in host.split(".") if p.lower() not in ("com", "net", "org", "cc", "cn", "io", "sub", "api", "www")]
+        if parts:
+            suggested_name = parts[0]
+        else:
+            suggested_name = "我的订阅源"
+
+    return {
+        "success": True,
+        "suggested_name": suggested_name,
+        "node_count": node_count,
+        "source_type": source_type,
+        "traffic_used": traffic_used,
+        "traffic_total": traffic_total
+    }
+
 @router.get("/api/sources", summary="获取当前用户可用上游源列表")
 async def list_sources(
     user: Annotated[User, Depends(get_current_user)],
@@ -1571,9 +1679,11 @@ async def list_sources(
     )
     res = await db.execute(stmt)
     sources = res.scalars().all()
+    disabled_ids = user.get_disabled_shared_source_ids()
     results = []
     for s in sources:
         extra = extract_subscription_extra_info(s.raw_content or "")
+        is_shared = bool(s.is_shared)
         results.append({
             "id": s.id,
             "name": s.name,
@@ -1585,15 +1695,44 @@ async def list_sources(
             "node_count": s.node_count,
             "traffic_used": s.traffic_used,
             "traffic_total": s.traffic_total,
-            "is_shared": s.is_shared,
+            "is_shared": is_shared,
             "user_id": s.user_id,
-            "can_manage": (s.user_id == user.id),
+            # 在用户页面上：平台公共共享源绝对不可删除与编辑！即便当前登录的是管理员也严格作为普通用户对待！
+            "can_manage": False if is_shared else (s.user_id == user.id),
+            "is_enabled_for_user": (s.id not in disabled_ids) if is_shared else bool(s.enabled),
             "expire_at": s.expire_at.isoformat() if s.expire_at else None,
             "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
             "reset_info": extra.get("reset_info"),
             "remaining_text": extra.get("remaining_text")
         })
     return results
+
+@router.post("/api/user/shared-sources/{source_id}/toggle", summary="用户个人级启用或禁用平台共享源")
+async def toggle_shared_source_for_user(
+    source_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    src = await db.get(Source, source_id)
+    if not src or not src.is_shared:
+        raise HTTPException(status_code=404, detail="平台共享源不存在")
+
+    disabled_ids = user.get_disabled_shared_source_ids()
+    if source_id in disabled_ids:
+        disabled_ids.remove(source_id)
+        is_enabled = True
+    else:
+        disabled_ids.add(source_id)
+        is_enabled = False
+
+    user.disabled_shared_sources = ",".join(str(i) for i in sorted(disabled_ids))
+    await db.commit()
+    return {
+        "status": "success",
+        "source_id": source_id,
+        "is_enabled_for_user": is_enabled,
+        "disabled_source_ids": list(disabled_ids)
+    }
 
 @router.post("/api/sources", summary="用户新增个人私有节点源")
 async def create_source(
@@ -1631,9 +1770,10 @@ async def update_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    if src.is_shared:
+        raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中编辑维护")
+
     if src.user_id != user.id:
-        if src.is_shared:
-            raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中编辑维护")
         raise HTTPException(status_code=403, detail="无权修改他人所属的私有节点源")
 
     if payload.name is not None:
@@ -1661,16 +1801,17 @@ async def delete_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    if src.is_shared:
+        raise HTTPException(status_code=403, detail="平台公共共享源不可在个人视图中删除，如需下线请前往管理员控制台")
+
     if src.user_id != user.id:
-        if src.is_shared:
-            raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中删除维护")
         raise HTTPException(status_code=403, detail="无权删除他人所属的私有节点源")
 
     await db.execute(delete(Source).where(Source.id == source_id))
     await db.commit()
     return {"status": "success"}
 
-@router.post("/api/sources/{source_id}/refresh", summary="手动刷新指定节点源")
+@router.post("/api/sources/{source_id}/refresh", summary="手动刷新指定个人节点源")
 async def refresh_source(
     source_id: int,
     user: Annotated[User, Depends(get_current_user)],
@@ -1682,7 +1823,10 @@ async def refresh_source(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if src.user_id != user.id and not src.is_shared:
+    if src.is_shared:
+        raise HTTPException(status_code=403, detail="平台共享源由系统自动调度同步，普通用户无法单独刷新全站公共源")
+
+    if src.user_id != user.id:
         raise HTTPException(status_code=403, detail="无权刷新他人所属的私有节点源")
 
     success = await sync_single_source(source_id, db)
@@ -1701,13 +1845,20 @@ async def list_nodes(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    disabled_shared = user.get_disabled_shared_source_ids()
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
         .where(Source.enabled.is_(True))
-        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
-        .order_by(Node.country_code, Node.id)
     )
+    if disabled_shared:
+        stmt = stmt.where(
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
+            | (Source.user_id == user.id)
+        )
+    else:
+        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+    stmt = stmt.order_by(Node.country_code, Node.id)
     res = await db.execute(stmt)
     rows = res.all()
 
@@ -1789,11 +1940,18 @@ async def batch_ping_nodes(
     db: Annotated[AsyncSession, Depends(get_db)],
     payload: BatchPingPayload | None = None
 ):
+    disabled_shared = user.get_disabled_shared_source_ids()
     stmt = (
         select(Node)
         .join(Source, Node.source_id == Source.id)
-        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
     )
+    if disabled_shared:
+        stmt = stmt.where(
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
+            | (Source.user_id == user.id)
+        )
+    else:
+        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
     if payload and payload.node_ids:
         stmt = stmt.where(Node.id.in_(payload.node_ids))
     res = await db.execute(stmt)

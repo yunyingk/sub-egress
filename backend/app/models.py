@@ -56,6 +56,7 @@ class User(Base):
     custom_direct_domains = Column(Text, default="ying-qing.cn", nullable=True)
     custom_proxy_domains = Column(Text, default="", nullable=True)
     custom_rules = Column(Text, default="", nullable=True)
+    disabled_shared_sources = Column(Text, default="", nullable=True)
     oauth_provider = Column(String(32), nullable=True)  # authentik / etc.
     oauth_id = Column(String(128), nullable=True)
     last_login_at = Column(UTCDateTime, nullable=True)
@@ -64,6 +65,11 @@ class User(Base):
 
     passkeys = relationship("PasskeyCredential", back_populates="user", cascade="all, delete-orphan")
     sources = relationship("Source", back_populates="user")
+
+    def get_disabled_shared_source_ids(self) -> set[int]:
+        if not self.disabled_shared_sources:
+            return set()
+        return {int(x.strip()) for x in self.disabled_shared_sources.split(",") if x.strip().isdigit()}
 
 
 class PasskeyCredential(Base):
