@@ -365,7 +365,7 @@ async def passkey_register_start(
     return {
         "challenge": challenge,
         "rp": {
-            "name": "sub-egress",
+            "name": "订阅调度 · sub-egress",
             "id": host
         },
         "user": {
