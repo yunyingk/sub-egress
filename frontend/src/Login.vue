@@ -3,13 +3,18 @@
     <!-- 顶部品牌标志 -->
     <div class="text-center mb-7">
       <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-500 to-blue-600 shadow-lg shadow-sky-500/25 mb-3.5">
-        <i class="fa-solid fa-satellite-dish text-white text-2xl"></i>
+        <i v-if="currentStep === 'github_bind'" class="fa-brands fa-github text-white text-2xl"></i>
+        <i v-else class="fa-solid fa-satellite-dish text-white text-2xl"></i>
       </div>
-      <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">sub-egress 认证中心</h1>
-      <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">出站网关调度中枢 · 独立安全门户</p>
+      <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+        {{ currentStep === 'github_bind' ? 'GitHub 身份关联核验' : 'sub-egress 认证中心' }}
+      </h1>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+        {{ currentStep === 'github_bind' ? '出站网关调度中枢 · 二级登录确认' : '出站网关调度中枢 · 独立安全门户' }}
+      </p>
     </div>
 
-    <!-- 登录主卡片 (无任何 Tab，单页结构) -->
+    <!-- 登录主卡片 -->
     <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 md:p-8">
       
       <!-- 错误警告提示 -->
@@ -24,102 +29,186 @@
         <div class="flex-1 leading-relaxed">{{ successMessage }}</div>
       </div>
 
-      <!-- 主体表单: 账号密码登录 -->
-      <form @submit.prevent="handlePasswordLogin" class="space-y-4">
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              用户名 <span class="text-slate-400 font-normal">(小写字母与数字)</span>
-            </label>
-            <button v-if="loginForm.username && /[A-Z]/.test(loginForm.username)" 
-                    type="button" @click="loginForm.username = loginForm.username.toLowerCase(); errorMessage = ''"
-                    class="text-[11px] text-sky-500 hover:underline">
-              一键转为纯小写
-            </button>
-          </div>
-          <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-              <i class="fa-regular fa-user"></i>
-            </span>
-            <input v-model="loginForm.username" @input="checkUsernameUppercase(loginForm.username)"
-                   type="text" required autocomplete="username" placeholder="请输入小写用户名"
-                   class="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              密码 <span class="text-slate-400 font-normal">(20~260位，严禁大写字母)</span>
-            </label>
-            <span class="text-[11px] text-slate-400 font-mono" :class="{'text-emerald-500': loginForm.password.length >= 20, 'text-amber-500': loginForm.password.length > 0 && loginForm.password.length < 20}">
-              {{ loginForm.password.length > 0 ? loginForm.password.length + '/260' : '' }}
-            </span>
-          </div>
-          <div class="relative">
-            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-              <i class="fa-solid fa-lock"></i>
-            </span>
-            <input v-model="loginForm.password" @input="checkPasswordUppercase(loginForm.password)"
-                   :type="showPassword ? 'text' : 'password'" required autocomplete="current-password" placeholder="请输入全小写密码"
-                   class="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-            <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-              <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
-            </button>
-          </div>
-        </div>
-
-        <button type="submit" :disabled="loading"
-                class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 cursor-pointer">
-          <i v-if="loading && actionType === 'password'" class="fa-solid fa-circle-notch fa-spin"></i>
-          <span>{{ (loading && actionType === 'password') ? '正在验证账号...' : '登 录' }}</span>
-        </button>
-      </form>
-
-      <!-- 分割区域: 下方两个卡片选项 -->
-      <div class="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
-        <div class="flex items-center justify-center -mt-9 mb-4">
-          <span class="bg-white dark:bg-slate-800 px-3 text-[11px] font-medium text-slate-400">或使用以下方式验证</span>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <!-- 卡片 1: 通行密钥登录 (Passkey) -->
-          <button type="button" @click="handlePasskeyLogin" :disabled="loading"
-                  class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-sky-50/80 dark:hover:bg-sky-950/40 hover:border-sky-300 dark:hover:border-sky-800 transition-all flex flex-col justify-between cursor-pointer disabled:opacity-50">
-            <div class="flex items-center gap-2.5 mb-2">
-              <div class="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 flex items-center justify-center text-base group-hover:scale-105 transition-transform">
-                <i v-if="loading && actionType === 'passkey'" class="fa-solid fa-circle-notch fa-spin"></i>
-                <i v-else class="fa-solid fa-fingerprint"></i>
-              </div>
-              <div>
-                <div class="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">通行密钥</div>
-                <div class="text-[10px] text-slate-400">免密极速验证</div>
-              </div>
+      <!-- 视图 A: 常规登录模式 -->
+      <div v-if="currentStep === 'normal'">
+        <!-- 主体表单: 账号密码登录 -->
+        <form @submit.prevent="handlePasswordLogin" class="space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                用户名 <span class="text-slate-400 font-normal">(小写字母与数字)</span>
+              </label>
+              <button v-if="loginForm.username && /[A-Z]/.test(loginForm.username)" 
+                      type="button" @click="loginForm.username = loginForm.username.toLowerCase(); errorMessage = ''"
+                      class="text-[11px] text-sky-500 hover:underline">
+                一键转为纯小写
+              </button>
             </div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              Touch ID / Face ID / 硬件密钥
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                <i class="fa-regular fa-user"></i>
+              </span>
+              <input v-model="loginForm.username" @input="checkUsernameUppercase(loginForm.username)"
+                     type="text" required autocomplete="username" placeholder="请输入小写用户名"
+                     class="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
             </div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                密码 <span class="text-slate-400 font-normal">(20~260位，严禁大写字母)</span>
+              </label>
+              <span class="text-[11px] text-slate-400 font-mono" :class="{'text-emerald-500': loginForm.password.length >= 20, 'text-amber-500': loginForm.password.length > 0 && loginForm.password.length < 20}">
+                {{ loginForm.password.length > 0 ? loginForm.password.length + '/260' : '' }}
+              </span>
+            </div>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input v-model="loginForm.password" @input="checkPasswordUppercase(loginForm.password)"
+                     :type="showPassword ? 'text' : 'password'" required autocomplete="current-password" placeholder="请输入全小写密码"
+                     class="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" :disabled="loading"
+                  class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 cursor-pointer">
+            <i v-if="loading && actionType === 'password'" class="fa-solid fa-circle-notch fa-spin"></i>
+            <span>{{ (loading && actionType === 'password') ? '正在验证账号...' : '登 录' }}</span>
           </button>
+        </form>
 
-          <!-- 卡片 2: 第三方统一登录 (Authentik SSO) -->
-          <a href="/outpost.goauthentik.io/start?rd=/api/auth/sso/callback" 
-             class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-blue-50/80 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-800 transition-all flex flex-col justify-between cursor-pointer">
-            <div class="flex items-center gap-2.5 mb-2">
-              <div class="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center text-base group-hover:scale-105 transition-transform">
-                <i class="fa-solid fa-id-card-clip"></i>
+        <!-- 分割区域: 下方其他验证方式 -->
+        <div class="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
+          <div class="flex items-center justify-center -mt-9 mb-4">
+            <span class="bg-white dark:bg-slate-800 px-3 text-[11px] font-medium text-slate-400">或使用以下方式验证</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <!-- 卡片 1: 通行密钥登录 (Passkey) -->
+            <button type="button" @click="handlePasskeyLogin" :disabled="loading"
+                    class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-sky-50/80 dark:hover:bg-sky-950/40 hover:border-sky-300 dark:hover:border-sky-800 transition-all flex flex-col justify-between cursor-pointer disabled:opacity-50">
+              <div class="flex items-center gap-2.5 mb-2">
+                <div class="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 flex items-center justify-center text-base group-hover:scale-105 transition-transform">
+                  <i v-if="loading && actionType === 'passkey'" class="fa-solid fa-circle-notch fa-spin"></i>
+                  <i v-else class="fa-solid fa-fingerprint"></i>
+                </div>
+                <div>
+                  <div class="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">通行密钥</div>
+                  <div class="text-[10px] text-slate-400">免密极速验证</div>
+                </div>
               </div>
-              <div>
-                <div class="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">第三方登录</div>
-                <div class="text-[10px] text-slate-400">Authentik SSO</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                Touch ID / Face ID / 硬件密钥
               </div>
+            </button>
+
+            <!-- 卡片 2: 第三方统一登录 (Authentik SSO) -->
+            <a href="/outpost.goauthentik.io/start?rd=/api/auth/sso/callback" 
+               class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-blue-50/80 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-800 transition-all flex flex-col justify-between cursor-pointer">
+              <div class="flex items-center gap-2.5 mb-2">
+                <div class="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center text-base group-hover:scale-105 transition-transform">
+                  <i class="fa-solid fa-id-card-clip"></i>
+                </div>
+                <div>
+                  <div class="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">第三方登录</div>
+                  <div class="text-[10px] text-slate-400">Authentik SSO</div>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                通过统一认证网关授权进入
+              </div>
+            </a>
+
+            <!-- 卡片 3: GitHub 登录 (跨双列) -->
+            <a href="/api/auth/github/start?mode=login" 
+               class="group sm:col-span-2 text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-slate-100 dark:hover:bg-slate-700/80 hover:border-slate-300 dark:hover:border-slate-600 transition-all flex items-center justify-between cursor-pointer">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-slate-900 dark:bg-slate-950 text-white flex items-center justify-center text-base group-hover:scale-105 transition-transform">
+                  <i class="fa-brands fa-github"></i>
+                </div>
+                <div>
+                  <div class="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-slate-950 dark:group-hover:text-white transition-colors">使用 GitHub 登录</div>
+                  <div class="text-[10px] text-slate-400">OAuth 快捷认证</div>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                已授权账号快捷验证 · 未开放公开注册
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 视图 B: GitHub 关联二级核验模式 (未关联用户必须在此核验已有系统账号) -->
+      <div v-else-if="currentStep === 'github_bind'" class="space-y-4">
+        <!-- 身份提示横幅 -->
+        <div class="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs">
+          <div class="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-200 mb-1">
+            <i class="fa-brands fa-github text-base"></i>
+            <span>GitHub 授权账号：@{{ githubUser }}</span>
+          </div>
+          <p class="text-amber-700 dark:text-amber-300 text-[11px] leading-relaxed">
+            该 GitHub 账号尚未关联系统用户。本系统为内部聚合出站网关，<strong>严禁自主注册</strong>。请输入由管理员为您分配的已有系统账号与密码完成二次验证并建立绑定。
+          </p>
+        </div>
+
+        <form @submit.prevent="handleGitHubBindLogin" class="space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                已有系统用户名 <span class="text-slate-400 font-normal">(小写字母与数字)</span>
+              </label>
+              <button v-if="bindForm.username && /[A-Z]/.test(bindForm.username)" 
+                      type="button" @click="bindForm.username = bindForm.username.toLowerCase(); errorMessage = ''"
+                      class="text-[11px] text-sky-500 hover:underline">
+                一键转为纯小写
+              </button>
             </div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              通过统一认证网关授权进入
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                <i class="fa-regular fa-user"></i>
+              </span>
+              <input v-model="bindForm.username" @input="checkUsernameUppercase(bindForm.username)"
+                     type="text" required autocomplete="username" placeholder="请输入系统已有用户名"
+                     class="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
             </div>
-          </a>
-          <a href="/api/auth/github/start?mode=login" class="group text-left p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-700/40 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex flex-col justify-between">
-            <div class="flex items-center gap-2.5 mb-2"><div class="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center"><i class="fa-brands fa-github"></i></div><div><div class="text-xs font-bold">使用 GitHub 登录</div><div class="text-[10px] text-slate-400">OAuth 身份认证</div></div></div>
-            <div class="text-[11px] text-slate-500">首次登录会创建独立账号</div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                已有系统密码 <span class="text-slate-400 font-normal">(严禁大写字母)</span>
+              </label>
+            </div>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input v-model="bindForm.password" @input="checkPasswordUppercase(bindForm.password)"
+                     :type="showPassword ? 'text' : 'password'" required autocomplete="current-password" placeholder="请输入已有系统密码"
+                     class="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" :disabled="loading"
+                  class="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 cursor-pointer">
+            <i v-if="loading && actionType === 'github_bind'" class="fa-solid fa-circle-notch fa-spin"></i>
+            <span>{{ (loading && actionType === 'github_bind') ? '正在核验并绑定...' : '核验账号并绑定登录' }}</span>
+          </button>
+        </form>
+
+        <div class="text-center pt-2">
+          <a href="/login" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+            <i class="fa-solid fa-arrow-left mr-1"></i>放弃绑定，返回常规登录
           </a>
         </div>
       </div>
@@ -155,13 +244,21 @@ function base64urlToBuffer(base64url) {
 
 export default {
   setup() {
+    const currentStep = ref('normal'); // 'normal' | 'github_bind'
+    const githubUser = ref('');
+    const pendingToken = ref('');
     const loading = ref(false);
-    const actionType = ref('password'); // password | passkey
+    const actionType = ref('password'); // password | passkey | github_bind
     const showPassword = ref(false);
     const errorMessage = ref('');
     const successMessage = ref('');
 
     const loginForm = reactive({
+      username: '',
+      password: ''
+    });
+
+    const bindForm = reactive({
       username: '',
       password: ''
     });
@@ -216,6 +313,42 @@ export default {
           setTimeout(() => { window.location.href = '/'; }, 400);
         } else {
           errorMessage.value = data.detail || '登录失败，请检查账号密码';
+        }
+      } catch (e) {
+        errorMessage.value = '网络请求失败，请稍后重试';
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    // 处理 GitHub 首次绑定验证
+    const handleGitHubBindLogin = async () => {
+      errorMessage.value = '';
+      successMessage.value = '';
+
+      if (/[A-Z]/.test(bindForm.username) || /[A-Z]/.test(bindForm.password)) {
+        errorMessage.value = '用户名或密码严禁包含大写字母，请修改后重试！';
+        return;
+      }
+
+      actionType.value = 'github_bind';
+      loading.value = true;
+      try {
+        const res = await fetch('/api/auth/github/bind-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pending_token: pendingToken.value,
+            username: bindForm.username,
+            password: bindForm.password
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          successMessage.value = data.message || '绑定成功，正在进入系统...';
+          setTimeout(() => { window.location.href = '/'; }, 500);
+        } else {
+          errorMessage.value = data.detail || '核验绑定失败，请检查账号密码';
         }
       } catch (e) {
         errorMessage.value = '网络请求失败，请稍后重试';
@@ -292,25 +425,38 @@ export default {
 
     onMounted(() => {
       const params = new URLSearchParams(window.location.search);
+      const step = params.get('step');
+      if (step === 'github_bind') {
+        currentStep.value = 'github_bind';
+        pendingToken.value = params.get('token') || '';
+        githubUser.value = params.get('gh_user') || '';
+      }
       const err = params.get('error');
       if (err === 'sso_unauthorized' || err === 'sso_failed') {
         errorMessage.value = '⚠️ 第三方单点登录授权未通过，请检查 Authentik 账号状态或使用账号密码登录';
       } else if (err === 'account_disabled') {
         errorMessage.value = '⚠️ 该第三方关联账号已被管理员禁用，请联系管理员处理';
       }
-      checkAuthStatus();
+      if (currentStep.value !== 'github_bind') {
+        checkAuthStatus();
+      }
     });
 
     return {
+      currentStep,
+      githubUser,
+      pendingToken,
       loading,
       actionType,
       showPassword,
       errorMessage,
       successMessage,
       loginForm,
+      bindForm,
       checkUsernameUppercase,
       checkPasswordUppercase,
       handlePasswordLogin,
+      handleGitHubBindLogin,
       handlePasskeyLogin
     };
   }

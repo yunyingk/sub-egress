@@ -114,3 +114,92 @@ def test_challenge_generation_and_consumption():
     assert verify_and_consume_challenge("test_key", c)
     # 第二次比对已被消费，应失败
     assert not verify_and_consume_challenge("test_key", c)
+
+
+@pytest.mark.asyncio
+async def test_github_bind_login_flow():
+    from app.api import (
+        SECRET_KEY,
+        GitHubBindLoginPayload,
+        github_bind_login,
+    )
+    from app.models import Base, User
+    from fastapi import HTTPException, Response
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as db:
+            # 创建初始测试用户
+            pwd = "test-strong-password-123456"
+            user = User(
+                username="testuser",
+                password_hash=hash_password(pwd),
+                role="user",
+                is_active=True,
+                sub_hash_token="token123"
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+
+            # 1. 签名有效的 GitHub 待绑定 token
+            pending_token = create_session_token(
+                {"action": "github_bind", "gh_id": "99999", "gh_login": "octocat"},
+                SECRET_KEY,
+                600
+            )
+
+            # 2. 错误的密码应该被拒绝
+            with pytest.raises(HTTPException) as exc_info:
+                await github_bind_login(
+                    GitHubBindLoginPayload(pending_token=pending_token, username="testuser", password="wrong-password-here"),
+                    Response(),
+                    db
+                )
+            assert exc_info.value.status_code == 400
+
+            # 3. 不存在的用户应该被拒绝（禁止注册）
+            with pytest.raises(HTTPException) as exc_info:
+                await github_bind_login(
+                    GitHubBindLoginPayload(pending_token=pending_token, username="nonexistent", password=pwd),
+                    Response(),
+                    db
+                )
+            assert exc_info.value.status_code == 400
+
+            # 4. 正确的账号密码，验证并成功绑定
+            res = Response()
+            result = await github_bind_login(
+                GitHubBindLoginPayload(pending_token=pending_token, username="testuser", password=pwd),
+                res,
+                db
+            )
+            assert result["status"] == "ok"
+            assert "sub_egress_session" in res.headers.get("set-cookie", "")
+
+            # 5. 再次尝试绑定至其他用户，应报 409
+            other_user = User(
+                username="otheruser",
+                password_hash=hash_password(pwd),
+                role="user",
+                is_active=True,
+                sub_hash_token="token456"
+            )
+            db.add(other_user)
+            await db.commit()
+
+            with pytest.raises(HTTPException) as exc_info:
+                await github_bind_login(
+                    GitHubBindLoginPayload(pending_token=pending_token, username="otheruser", password=pwd),
+                    Response(),
+                    db
+                )
+            assert exc_info.value.status_code == 409
+    finally:
+        await engine.dispose()
+

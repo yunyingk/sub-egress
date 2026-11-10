@@ -53,6 +53,10 @@ from .security import (
 from .syncer import ping_single_node, sync_single_source
 from .version import VERSION
 
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be configured with a private random value")
+
 router = APIRouter()
 GITHUB_OAUTH_ISSUER = "https://github.com"
 
@@ -101,30 +105,85 @@ async def github_oauth_callback(request: Request, db: Annotated[AsyncSession, De
         if not identity:
             identity = OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject)
             db.add(identity)
+        user.last_login_at = datetime.now(UTC)
+        await db.commit()
+        response = RedirectResponse("/", status_code=302)
+        response.delete_cookie("github_oauth_state", path="/")
+        return response
     else:
         user = await db.get(User, identity.user_id) if identity else None
         if not user:
-            github_name = "gh" + subject
-            username = github_name[:20]
-            exists = await db.execute(select(User.id).where(User.username == username))
-            if exists.scalar_one_or_none():
-                username = "gh" + secrets.token_hex(8)
-            user = User(username=username, role="user", is_active=True, sub_hash_token=secrets.token_hex(24), subscription_title="sub-egress", clash_mixed_port="7897", clash_terminal_port="7898")
-            db.add(user)
-            await db.flush()
-            db.add(OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject))
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="账户已禁用")
+            # 严格禁止自动创建账号！签发临时 pending token 进入二级绑定核验页
+            pending_token = create_session_token(
+                {"action": "github_bind", "gh_id": subject, "gh_login": profile.get("login") or subject},
+                SECRET_KEY,
+                600
+            )
+            gh_login_param = urllib.parse.quote(profile.get("login") or subject)
+            response = RedirectResponse(
+                f"/login?step=github_bind&token={pending_token}&gh_user={gh_login_param}",
+                status_code=302
+            )
+            response.delete_cookie("github_oauth_state", path="/")
+            return response
+
+        if not user.is_active:
+            return RedirectResponse("/login?error=account_disabled", status_code=302)
+
+        user.last_login_at = datetime.now(UTC)
+        await db.commit()
+        response = RedirectResponse("/", status_code=302)
+        response.delete_cookie("github_oauth_state", path="/")
+        set_auth_cookie(response, user)
+        return response
+
+
+class GitHubBindLoginPayload(BaseModel):
+    pending_token: str
+    username: str
+    password: str
+
+
+@router.post("/api/auth/github/bind-login", summary="GitHub 未关联用户二级身份校验与账号绑定")
+async def github_bind_login(
+    payload: GitHubBindLoginPayload,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    token_data = verify_session_token(payload.pending_token, SECRET_KEY)
+    if not token_data or token_data.get("action") != "github_bind":
+        raise HTTPException(status_code=400, detail="GitHub 授权会话已过期，请重新点击 GitHub 登录")
+
+    gh_id = str(token_data.get("gh_id", "")).strip()
+    gh_login = str(token_data.get("gh_login", "")).strip()
+    if not gh_id:
+        raise HTTPException(status_code=400, detail="无效的 GitHub 授权标识")
+
+    username = payload.username.strip().lower()
+    password = payload.password.strip()
+
+    stmt = select(User).where(User.username == username)
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+
+    if not user or not user.is_active or not user.password_hash or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=400, detail="系统账号或密码验证失败。若无系统分配账号则无法登录。")
+
+    id_stmt = select(OAuthIdentity).where(OAuthIdentity.issuer == GITHUB_OAUTH_ISSUER, OAuthIdentity.subject == gh_id)
+    id_res = await db.execute(id_stmt)
+    existing_identity = id_res.scalar_one_or_none()
+    if existing_identity and existing_identity.user_id != user.id:
+        raise HTTPException(status_code=409, detail="该 GitHub 账号已绑定至其他系统用户")
+
+    if not existing_identity:
+        db.add(OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=gh_id))
+
     user.last_login_at = datetime.now(UTC)
     await db.commit()
-    response = RedirectResponse("/" if state_data.get("mode") == "login" else "/", status_code=302)
-    response.delete_cookie("github_oauth_state", path="/")
-    set_auth_cookie(response, user)
-    return response
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY must be configured with a private random value")
+    set_auth_cookie(response, user)
+    return {"status": "ok", "message": f"成功将 GitHub (@{gh_login}) 与已有用户 [{user.username}] 关联并登录！"}
+
 
 DEFAULT_SETTINGS = {
     "sub_hash_token": "e699ffd91845385075b27d813b8590df40375c6af2c4eb77",
