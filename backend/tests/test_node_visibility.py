@@ -26,7 +26,7 @@ async def test_node_list_respects_source_visibility(tmp_path, monkeypatch):
                 ("other-private", 2, False, True),
                 ("disabled", 1, True, False),
             ):
-                source = Source(name=name, url="https://example.test/", user_id=owner,
+                source = Source(name=name, url="https://example.test/", owner_user_id=None if shared else owner, created_by_user_id=owner,
                                 is_shared=shared, enabled=enabled)
                 session.add(source)
                 await session.flush()

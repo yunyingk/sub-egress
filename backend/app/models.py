@@ -4,6 +4,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -50,6 +51,7 @@ class User(Base):
     role = Column(String(32), default="user", nullable=False)  # admin / user
     is_active = Column(Boolean, default=True, nullable=False)
     sub_hash_token = Column(String(64), nullable=False, unique=True, index=True)
+    theme_mode = Column(String(16), default="system", server_default="system", nullable=False)
     subscription_title = Column(String(128), default="sub-egress", nullable=False)
     clash_mixed_port = Column(String(16), default="7897", nullable=False)
     clash_terminal_port = Column(String(16), default="7898", nullable=False)
@@ -64,7 +66,7 @@ class User(Base):
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     passkeys = relationship("PasskeyCredential", back_populates="user", cascade="all, delete-orphan")
-    sources = relationship("Source", back_populates="user")
+    sources = relationship("Source", back_populates="owner", foreign_keys="Source.owner_user_id")
 
     def get_disabled_shared_source_ids(self) -> set[int]:
         if not self.disabled_shared_sources:
@@ -107,7 +109,8 @@ class Source(Base):
     __tablename__ = "sources"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     is_shared = Column(Boolean, default=True, nullable=False)
     name = Column(String(64), nullable=False, index=True)
     code = Column(String(8), default="", nullable=True)
@@ -126,7 +129,9 @@ class Source(Base):
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     nodes = relationship("Node", back_populates="source", cascade="all, delete-orphan")
-    user = relationship("User", back_populates="sources")
+    __table_args__ = (CheckConstraint("(is_shared AND owner_user_id IS NULL) OR (NOT is_shared AND owner_user_id IS NOT NULL)", name="ck_sources_owner_scope"),)
+    owner = relationship("User", back_populates="sources", foreign_keys=[owner_user_id])
+    creator = relationship("User", foreign_keys=[created_by_user_id])
 
 
 class Node(Base):

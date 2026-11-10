@@ -179,6 +179,7 @@ import AdminPanel from './components/AdminPanel.vue';
 import AdminRules from './components/AdminRules.vue';
 import AdminSources from './components/AdminSources.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
+import { syncAccountTheme } from './theme.js';
 
 export default {
   name: 'App',
@@ -245,7 +246,7 @@ export default {
     const creatingSource = ref(false);
 
     const settings = ref({
-      sub_hash_token: 'e699ffd91845385075b27d813b8590df40375c6af2c4eb77',
+      sub_hash_token: '',
       require_token: false,
       default_target: 'clash',
       update_interval: '12',
@@ -266,6 +267,7 @@ export default {
         const res = await fetch('/api/auth/me');
         if (res.ok) {
           currentUser.value = await res.json();
+          syncAccountTheme(currentUser.value);
           // 同步用户专属的 Token 和配置
           if (currentUser.value.sub_hash_token) {
             settings.value.sub_hash_token = currentUser.value.sub_hash_token;
@@ -425,7 +427,7 @@ export default {
       savingSettings.value = true;
       try {
         const personalSettings = Object.fromEntries(
-          ['sub_hash_token', 'subscription_title', 'clash_mixed_port', 'clash_terminal_port', 'custom_direct_domains', 'custom_proxy_domains', 'custom_rules']
+          ['subscription_title', 'clash_mixed_port', 'clash_terminal_port', 'custom_direct_domains', 'custom_proxy_domains', 'custom_rules']
             .filter((key) => newSettings[key] !== undefined)
             .map((key) => [key, newSettings[key]])
         );

@@ -1,7 +1,7 @@
 <template>
     <div class="relative theme-toggle-container">
       <button @click.stop="toggleDropdown" 
-              type="button"
+              type="button" :disabled="!themeReady || themeSaving"
               class="px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 shadow-xs transition-all flex items-center gap-2"
               :title="'当前外观: ' + (themeMode === 'light' ? '浅色' : themeMode === 'dark' ? '深色' : '跟随系统')">
         <i v-if="themeMode === 'light'" class="fa-solid fa-sun text-amber-500 text-sm"></i>
@@ -14,6 +14,8 @@
         <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 transition-transform duration-200"
            :class="{'rotate-180': isOpen}"></i>
       </button>
+
+      <span v-if="themeError" role="alert" class="absolute right-0 top-full mt-1 text-xs text-rose-600 whitespace-nowrap">{{ themeError }}</span>
 
       <!-- 三选一下拉菜单 (浅色 / 深色 / 跟随系统) -->
       <div v-show="isOpen" 
@@ -59,84 +61,25 @@
 
 <script>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { themeMode, themeReady, themeSaving, themeError, selectAccountTheme } from '../theme.js';
 
 export default {
   name: 'ThemeToggle',
   setup() {
     const isOpen = ref(false);
-    const themeMode = ref('system'); // 'light' | 'dark' | 'system'
-    const systemPrefersDark = ref(false);
-
-    let mediaQuery = null;
-
-    const updateSystemPreference = (e) => {
-      systemPrefersDark.value = e.matches;
-      if (themeMode.value === 'system') {
-        applyTheme();
-      }
-    };
-
-    const applyTheme = () => {
-      let isDark = false;
-      if (themeMode.value === 'dark') {
-        isDark = true;
-      } else if (themeMode.value === 'light') {
-        isDark = false;
-      } else {
-        isDark = systemPrefersDark.value;
-      }
-
-      if (isDark) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.remove('light');
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.documentElement.classList.add('light');
-      }
-    };
 
     const selectTheme = (mode) => {
-      themeMode.value = mode;
-      localStorage.setItem('sub_egress_theme_mode', mode);
-      applyTheme();
       isOpen.value = false;
+      selectAccountTheme(mode);
     };
-
-    const toggleDropdown = () => {
-      isOpen.value = !isOpen.value;
-    };
-
+    const toggleDropdown = () => { isOpen.value = !isOpen.value; };
     const handleClickOutside = (e) => {
-      if (isOpen.value && !e.target.closest('.theme-toggle-container')) {
-        isOpen.value = false;
-      }
+      if (isOpen.value && !e.target.closest('.theme-toggle-container')) isOpen.value = false;
     };
+    onMounted(() => document.addEventListener('click', handleClickOutside));
+    onUnmounted(() => document.removeEventListener('click', handleClickOutside));
 
-    onMounted(() => {
-      mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      systemPrefersDark.value = mediaQuery.matches;
-      mediaQuery.addEventListener('change', updateSystemPreference);
-
-      const saved = localStorage.getItem('sub_egress_theme_mode') || localStorage.getItem('sub_egress_theme') || 'system';
-      themeMode.value = ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
-      applyTheme();
-
-      document.addEventListener('click', handleClickOutside);
-    });
-
-    onUnmounted(() => {
-      if (mediaQuery) {
-        mediaQuery.removeEventListener('change', updateSystemPreference);
-      }
-      document.removeEventListener('click', handleClickOutside);
-    });
-
-    return {
-      isOpen,
-      themeMode,
-      selectTheme,
-      toggleDropdown
-    };
+    return { isOpen, themeMode, themeReady, themeSaving, themeError, selectTheme, toggleDropdown };
   }
 };
 </script>

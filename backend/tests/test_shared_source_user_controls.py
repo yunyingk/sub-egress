@@ -32,7 +32,7 @@ async def create_test_env():
                 name="Platform Shared Global",
                 url="local://shared",
                 is_shared=True,
-                user_id=1,  # Created by admin
+                created_by_user_id=1,  # Created by admin
                 enabled=True
             )
             session.add(shared_src)
@@ -143,3 +143,29 @@ async def test_probe_subscription_source():
     res = await probe_subscription_source(ProbeSourcePayload(url="https://sub.resip.cc/test"), user=user)
     assert res["success"] is True
     assert res["suggested_name"] == "RESIP"
+
+
+@pytest.mark.asyncio
+async def test_admin_disabled_shared_source_hidden_for_every_user():
+    from app.api import admin_list_sources, batch_ping_nodes, ping_node_endpoint
+
+    async with create_test_env() as session_factory:
+        async with session_factory() as db:
+            admin = await db.get(User, 1)
+            alice = await db.get(User, 2)
+            shared = await db.get(Source, 10)
+            shared.enabled = False
+            await db.commit()
+            assert any(s['id'] == 10 for s in await admin_list_sources(admin=admin, db=db))
+            for user in (admin, alice):
+                assert not any(s['id'] == 10 for s in await list_sources(user=user, db=db))
+                assert not (await list_nodes(user=user, db=db))['nodes']
+                assert (await batch_ping_nodes(user=user, db=db, payload=None))['total'] == 0
+                with pytest.raises(HTTPException):
+                    await toggle_shared_source_for_user(source_id=10, user=user, db=db)
+                with pytest.raises(HTTPException) as error:
+                    await ping_node_endpoint(node_id=100, user=user, db=db)
+                assert error.value.status_code == 404
+            shared.enabled = True
+            await db.commit()
+            assert any(s['id'] == 10 for s in await list_sources(user=alice, db=db))

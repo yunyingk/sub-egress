@@ -2,11 +2,12 @@ import os
 import secrets
 from pathlib import Path
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .models import Base, Setting, User
 from .security import generate_secure_password, hash_password, validate_password
+from .source_migration import migrate_source_ownership
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -33,8 +34,16 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 
 async def init_db():
     async with engine.begin() as conn:
+        if DATABASE_URL.startswith("sqlite"):
+            await conn.execute(text("BEGIN"))
         await conn.run_sync(Base.metadata.create_all)
         
+        source_columns = await conn.run_sync(
+            lambda sync: {column["name"] for column in inspect(sync).get_columns("sources")}
+        )
+        if "owner_user_id" not in source_columns and "user_id" not in source_columns:
+            await conn.execute(text("ALTER TABLE sources ADD COLUMN user_id INTEGER"))
+
         # 兼容已有数据库结构，平滑增补字段
         if not DATABASE_URL.startswith("sqlite"):
             old_timestamps = await conn.execute(text("""
@@ -49,9 +58,9 @@ async def init_db():
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_status VARCHAR(32);"))
             await conn.execute(text("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS latency_updated_at TIMESTAMP WITH TIME ZONE;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS code VARCHAR(8);"))
-            await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS user_id INTEGER;"))
             await conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_shared BOOLEAN DEFAULT TRUE;"))
             await conn.execute(text("ALTER TABLE sources DROP CONSTRAINT IF EXISTS sources_name_key;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_mode VARCHAR(16) NOT NULL DEFAULT 'system';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_proxy_domains TEXT DEFAULT '';"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_rules TEXT DEFAULT '';"))
@@ -72,13 +81,13 @@ async def init_db():
                 s_cols = [row[1] for row in s_res.fetchall()]
                 if "code" not in s_cols:
                     await conn.execute(text("ALTER TABLE sources ADD COLUMN code TEXT;"))
-                if "user_id" not in s_cols:
-                    await conn.execute(text("ALTER TABLE sources ADD COLUMN user_id INTEGER;"))
                 if "is_shared" not in s_cols:
                     await conn.execute(text("ALTER TABLE sources ADD COLUMN is_shared BOOLEAN DEFAULT 1;"))
 
                 u_res = await conn.execute(text("PRAGMA table_info(users);"))
                 u_cols = [row[1] for row in u_res.fetchall()]
+                if "theme_mode" not in u_cols:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN theme_mode VARCHAR(16) NOT NULL DEFAULT 'system';"))
                 if "custom_direct_domains" not in u_cols:
                     await conn.execute(text("ALTER TABLE users ADD COLUMN custom_direct_domains TEXT DEFAULT 'ying-qing.cn';"))
                 if "custom_proxy_domains" not in u_cols:
@@ -89,6 +98,8 @@ async def init_db():
                     await conn.execute(text("ALTER TABLE users ADD COLUMN disabled_shared_sources TEXT DEFAULT '';"))
             except Exception as exc:
                 raise RuntimeError("SQLite schema initialization failed") from exc
+
+        await migrate_source_ownership(conn)
 
     # 管理员初始化与忘记密码检查
     async with AsyncSessionLocal() as session:
@@ -102,7 +113,11 @@ async def init_db():
             set_stmt = select(Setting).where(Setting.key == "sub_hash_token")
             set_res = await session.execute(set_stmt)
             existing_token_setting = set_res.scalar_one_or_none()
-            inherited_token = existing_token_setting.value if existing_token_setting else secrets.token_hex(24)
+            inherited_token = existing_token_setting.value if existing_token_setting and not admin_user else secrets.token_hex(24)
+            if not admin_user and existing_token_setting:
+                collision = await session.scalar(select(User.id).where(User.sub_hash_token == inherited_token))
+                if collision is not None:
+                    raise RuntimeError("Legacy subscription token already belongs to a user; cannot assign it to admin")
 
             if not admin_user:
                 # 首次启动：自动生成 32 位全小写强随机密码
@@ -134,6 +149,10 @@ async def init_db():
                     admin_user.sub_hash_token = inherited_token
                     await session.commit()
 
+            if existing_token_setting:
+                await session.delete(existing_token_setting)
+                await session.commit()
+
             # 2. 检查环境变量 RESET_ADMIN_PASSWORD（管理员忘记密码通过重启服务器重置）
             env_reset_pwd = os.getenv("RESET_ADMIN_PASSWORD", "").strip()
             if env_reset_pwd and admin_user:
@@ -147,7 +166,7 @@ async def init_db():
                 else:
                     print(f"\n[sub-egress 警告] 环境变量 RESET_ADMIN_PASSWORD 格式不符合规范: {msg}，密码未变更。\n")
         except Exception as e:
-            print(f"[sub-egress 警告] 初始化用户或重设密码时异常: {e}")
+            raise RuntimeError("Failed to initialize admin or migrate legacy subscription token") from e
 
 async def get_db():
     async with AsyncSessionLocal() as session:

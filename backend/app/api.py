@@ -8,7 +8,7 @@ import time
 import urllib.parse
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import (
@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from .auth_webauthn import (
     encode_b64url,
@@ -222,7 +222,6 @@ async def github_bind_login(
 
 
 DEFAULT_SETTINGS = {
-    "sub_hash_token": "e699ffd91845385075b27d813b8590df40375c6af2c4eb77",
     "require_token": "false",
     "default_target": "clash",
     "update_interval": "12",
@@ -399,6 +398,7 @@ async def auth_me(user: Annotated[User, Depends(get_current_user)], db: Annotate
         "role": user.role,
         "is_active": user.is_active,
         "has_password": bool(user.password_hash),
+        "theme_mode": user.theme_mode,
         "sub_hash_token": user.sub_hash_token,
         "subscription_title": user.subscription_title,
         "clash_mixed_port": user.clash_mixed_port,
@@ -749,6 +749,7 @@ def _get_stored_challenge(key: str) -> str | None:
 # ==================== 用户个人设置 API ====================
 
 class UserSettingsPayload(BaseModel):
+    theme_mode: Literal["system", "light", "dark"] | None = None
     subscription_title: str | None = None
     clash_mixed_port: str | None = None
     clash_terminal_port: str | None = None
@@ -762,6 +763,8 @@ async def update_user_settings(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    if payload.theme_mode is not None:
+        user.theme_mode = payload.theme_mode
     if payload.subscription_title is not None:
         user.subscription_title = payload.subscription_title.strip()
     if payload.clash_mixed_port is not None:
@@ -1153,16 +1156,18 @@ async def admin_list_sources(
     db: Annotated[AsyncSession, Depends(get_db)],
     scope: str = "shared"  # "shared" 或 "all"
 ):
+    creator = aliased(User)
     if scope == "all":
         stmt = (
-            select(Source, User.username)
-            .outerjoin(User, Source.user_id == User.id)
+            select(Source, User.username, creator.username)
+            .outerjoin(User, Source.owner_user_id == User.id)
+            .outerjoin(creator, Source.created_by_user_id == creator.id)
             .order_by(Source.is_shared.desc(), Source.id)
         )
         res = await db.execute(stmt)
         rows = res.all()
         results = []
-        for s, uname in rows:
+        for s, uname, creator_name in rows:
             extra = extract_subscription_extra_info(s.raw_content or "")
             results.append({
                 "id": s.id,
@@ -1176,7 +1181,9 @@ async def admin_list_sources(
                 "traffic_used": s.traffic_used,
                 "traffic_total": s.traffic_total,
                 "is_shared": s.is_shared,
-                "user_id": s.user_id,
+                "owner_user_id": s.owner_user_id,
+                "created_by_user_id": s.created_by_user_id,
+                "creator_username": creator_name,
                 "owner_username": uname or ("系统平台共享" if s.is_shared else "未知用户"),
                 "can_edit": bool(s.is_shared),
                 "can_manage": bool(s.is_shared),
@@ -1187,11 +1194,10 @@ async def admin_list_sources(
             })
         return results
     else:
-        stmt = select(Source).where(Source.is_shared.is_(True)).order_by(Source.id)
+        stmt = select(Source, creator.username).outerjoin(creator, Source.created_by_user_id == creator.id).where(Source.is_shared.is_(True)).order_by(Source.id)
         res = await db.execute(stmt)
-        sources = res.scalars().all()
         results = []
-        for s in sources:
+        for s, creator_name in res.all():
             extra = extract_subscription_extra_info(s.raw_content or "")
             results.append({
                 "id": s.id,
@@ -1205,7 +1211,9 @@ async def admin_list_sources(
                 "traffic_used": s.traffic_used,
                 "traffic_total": s.traffic_total,
                 "is_shared": True,
-                "user_id": s.user_id,
+                "owner_user_id": s.owner_user_id,
+                "created_by_user_id": s.created_by_user_id,
+                "creator_username": creator_name,
                 "owner_username": "平台共享",
                 "can_manage": True,
                 "expire_at": s.expire_at.isoformat() if s.expire_at else None,
@@ -1222,7 +1230,8 @@ async def admin_create_source(
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     src = Source(
-        user_id=admin.id,
+        owner_user_id=None,
+        created_by_user_id=admin.id,
         is_shared=True,
         name=payload.name.strip(),
         url=payload.url.strip(),
@@ -1335,9 +1344,8 @@ async def export_subscription(
         matched_user = u_res.scalar_one_or_none()
 
     # 读权限安全检查
-    if settings.get("require_token", "false").lower() == "true":
-        expected_token = settings.get("sub_hash_token", "")
-        if not matched_user and req_token != expected_token:
+    if req_token or settings.get("require_token", "false").lower() == "true":
+        if not matched_user:
             raise HTTPException(
                 status_code=403,
                 detail="403 Forbidden: Invalid or missing subscription security hash token"
@@ -1366,10 +1374,10 @@ async def export_subscription(
         if disabled_shared:
             stmt = stmt.where(
                 ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
-                | (Source.user_id == matched_user.id)
+                | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id))
             )
         else:
-            stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
+            stmt = stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id)))
     else:
         stmt = stmt.where(Source.is_shared.is_(True))
 
@@ -1389,7 +1397,10 @@ async def export_subscription(
     # 计算总流量与到期时间
     src_stmt = select(Source).where(Source.enabled.is_(True))
     if matched_user:
-        src_stmt = src_stmt.where((Source.is_shared.is_(True)) | (Source.user_id == matched_user.id))
+        src_stmt = src_stmt.where(
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(matched_user.get_disabled_shared_source_ids())))
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id))
+        )
     else:
         src_stmt = src_stmt.where(Source.is_shared.is_(True))
 
@@ -1540,7 +1551,7 @@ async def update_settings(
     if any(value is not None for value in (payload.require_token, payload.default_target, payload.update_interval, payload.write_api_token)):
         raise HTTPException(status_code=403, detail="全局安全设置仅管理员可修改")
     if payload.sub_hash_token is not None:
-        user.sub_hash_token = payload.sub_hash_token.strip()
+        raise HTTPException(status_code=400, detail="订阅令牌由系统随机生成，请使用重置接口")
     if payload.subscription_title is not None:
         updates["subscription_title"] = payload.subscription_title.strip()
         user.subscription_title = payload.subscription_title.strip()
@@ -1672,16 +1683,20 @@ async def list_sources(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    creator = aliased(User)
     stmt = (
-        select(Source)
-        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        select(Source, creator.username)
+        .outerjoin(creator, Source.created_by_user_id == creator.id)
+        .where(
+            ((Source.is_shared.is_(True)) & (Source.enabled.is_(True)))
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
+        )
         .order_by(Source.id)
     )
     res = await db.execute(stmt)
-    sources = res.scalars().all()
     disabled_ids = user.get_disabled_shared_source_ids()
     results = []
-    for s in sources:
+    for s, creator_name in res.all():
         extra = extract_subscription_extra_info(s.raw_content or "")
         is_shared = bool(s.is_shared)
         results.append({
@@ -1696,9 +1711,12 @@ async def list_sources(
             "traffic_used": s.traffic_used,
             "traffic_total": s.traffic_total,
             "is_shared": is_shared,
-            "user_id": s.user_id,
+            "owner_user_id": s.owner_user_id,
+            "created_by_user_id": s.created_by_user_id,
+            "creator_username": creator_name,
+            "owner_username": "平台" if is_shared else user.username,
             # 在用户页面上：平台公共共享源绝对不可删除与编辑！即便当前登录的是管理员也严格作为普通用户对待！
-            "can_manage": False if is_shared else (s.user_id == user.id),
+            "can_manage": False if is_shared else (s.owner_user_id == user.id),
             "is_enabled_for_user": (s.id not in disabled_ids) if is_shared else bool(s.enabled),
             "expire_at": s.expire_at.isoformat() if s.expire_at else None,
             "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
@@ -1714,7 +1732,7 @@ async def toggle_shared_source_for_user(
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     src = await db.get(Source, source_id)
-    if not src or not src.is_shared:
+    if not src or not src.is_shared or not src.enabled:
         raise HTTPException(status_code=404, detail="平台共享源不存在")
 
     disabled_ids = user.get_disabled_shared_source_ids()
@@ -1742,7 +1760,8 @@ async def create_source(
 ):
     # 用户首页添加的源永远属于该用户专属私有，禁止任何用户在用户页直接添加共享源
     src = Source(
-        user_id=user.id,
+        owner_user_id=user.id,
+        created_by_user_id=user.id,
         is_shared=False,
         name=payload.name.strip(),
         url=payload.url.strip(),
@@ -1773,7 +1792,7 @@ async def update_source(
     if src.is_shared:
         raise HTTPException(status_code=403, detail="平台共享源需在管理员控制台中编辑维护")
 
-    if src.user_id != user.id:
+    if src.owner_user_id != user.id:
         raise HTTPException(status_code=403, detail="无权修改他人所属的私有节点源")
 
     if payload.name is not None:
@@ -1804,7 +1823,7 @@ async def delete_source(
     if src.is_shared:
         raise HTTPException(status_code=403, detail="平台公共共享源不可在个人视图中删除，如需下线请前往管理员控制台")
 
-    if src.user_id != user.id:
+    if src.owner_user_id != user.id:
         raise HTTPException(status_code=403, detail="无权删除他人所属的私有节点源")
 
     await db.execute(delete(Source).where(Source.id == source_id))
@@ -1826,7 +1845,7 @@ async def refresh_source(
     if src.is_shared:
         raise HTTPException(status_code=403, detail="平台共享源由系统自动调度同步，普通用户无法单独刷新全站公共源")
 
-    if src.user_id != user.id:
+    if src.owner_user_id != user.id:
         raise HTTPException(status_code=403, detail="无权刷新他人所属的私有节点源")
 
     success = await sync_single_source(source_id, db)
@@ -1854,10 +1873,10 @@ async def list_nodes(
     if disabled_shared:
         stmt = stmt.where(
             ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
-            | (Source.user_id == user.id)
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
         )
     else:
-        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        stmt = stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id)))
     stmt = stmt.order_by(Node.country_code, Node.id)
     res = await db.execute(stmt)
     rows = res.all()
@@ -1912,8 +1931,11 @@ async def ping_node_endpoint(
     stmt = (
         select(Node)
         .join(Source, Node.source_id == Source.id)
-        .where(Node.id == node_id)
-        .where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        .where(Node.id == node_id, Source.enabled.is_(True))
+        .where(
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(user.get_disabled_shared_source_ids())))
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
+        )
     )
     res = await db.execute(stmt)
     node = res.scalar_one_or_none()
@@ -1944,14 +1966,15 @@ async def batch_ping_nodes(
     stmt = (
         select(Node)
         .join(Source, Node.source_id == Source.id)
+        .where(Source.enabled.is_(True))
     )
     if disabled_shared:
         stmt = stmt.where(
             ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
-            | (Source.user_id == user.id)
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id))
         )
     else:
-        stmt = stmt.where((Source.is_shared.is_(True)) | (Source.user_id == user.id))
+        stmt = stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == user.id)))
     if payload and payload.node_ids:
         stmt = stmt.where(Node.id.in_(payload.node_ids))
     res = await db.execute(stmt)

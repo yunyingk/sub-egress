@@ -97,6 +97,7 @@
                 </span>
               </div>
 
+              <div class="text-xs text-slate-500 dark:text-slate-400">创建人：{{ src.creator_username || '未知' }}</div>
               <div class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate" :title="src.url">
                 {{ maskUrl(src.url) }}
               </div>

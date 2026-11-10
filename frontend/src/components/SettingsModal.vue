@@ -155,7 +155,7 @@
               </label>
               <p class="text-[11px] text-slate-500 dark:text-slate-400 mb-2">保护下游订阅免遭公网探测，混淆在 URL 路径中。</p>
               <div class="flex items-center gap-2">
-                <input v-model="editSettings.sub_hash_token" type="text" 
+                <input v-model="editSettings.sub_hash_token" type="text" readonly
                        class="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
                 <button @click="handleGenerate" title="随机生成新令牌" 
                         class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition font-medium">

@@ -42,15 +42,15 @@ async def create_test_env():
 
             shared_src = Source(
                 id=10, name="公共优质节点", url="https://example.com/shared.yaml",
-                user_id=1, is_shared=True, enabled=True
+                owner_user_id=None, created_by_user_id=1, is_shared=True, enabled=True
             )
             alice_src = Source(
                 id=20, name="Alice住宅宽带", url="https://example.com/alice.yaml",
-                user_id=2, is_shared=False, enabled=True
+                owner_user_id=2, created_by_user_id=2, is_shared=False, enabled=True
             )
             bob_src = Source(
                 id=30, name="Bob游戏专线", url="https://example.com/bob.yaml",
-                user_id=3, is_shared=False, enabled=True
+                owner_user_id=3, created_by_user_id=3, is_shared=False, enabled=True
             )
             session.add_all([shared_src, alice_src, bob_src])
             await session.flush()
@@ -149,7 +149,7 @@ async def test_user_source_creation_always_private(monkeypatch):
         assert res["status"] == "success"
 
         new_src = await db.get(Source, res["id"])
-        assert new_src.user_id == alice.id
+        assert new_src.owner_user_id == alice.id
         assert new_src.is_shared is False
 
         res_admin = await create_source(
@@ -158,7 +158,7 @@ async def test_user_source_creation_always_private(monkeypatch):
             db=db
         )
         admin_src = await db.get(Source, res_admin["id"])
-        assert admin_src.user_id == admin.id
+        assert admin_src.owner_user_id == admin.id
         assert admin_src.is_shared is False
 
 
@@ -256,3 +256,73 @@ async def test_node_ping_tenant_isolation(monkeypatch):
         with pytest.raises(HTTPException) as exc_info:
             await ping_node_endpoint(node_id=301, user=alice, db=db)
         assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_can_disable_own_created_shared_source_and_statistics():
+    from app.api import export_subscription, toggle_shared_source_for_user
+    from starlette.requests import Request
+
+    async with create_test_env() as (db, admin, alice, bob):
+        shared = await db.get(Source, 10)
+        shared.traffic_used = 100
+        shared.traffic_total = 200
+        await db.commit()
+        await toggle_shared_source_for_user(source_id=10, user=admin, db=db)
+        assert not (await list_nodes(user=admin, db=db))["nodes"]
+        request = Request({"type": "http", "method": "GET", "path": "/c/admin-token", "headers": [(b"host", b"example.test")], "scheme": "https", "query_string": b""})
+        response = await export_subscription(request=request, db=db, token=admin.sub_hash_token, target="base64", type=None, name=None, title=None, t=None)
+        assert response.body == b""
+        assert 'subscription-userinfo' not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_manual_subscription_token_is_rejected():
+    from app.api import SettingsPayload, update_settings
+
+    async with create_test_env() as (db, admin, alice, bob):
+        with pytest.raises(HTTPException) as error:
+            await update_settings(SettingsPayload(sub_hash_token='manual'), user=alice, db=db)
+        assert error.value.status_code == 400
+        assert alice.sub_hash_token == 'alice-token'
+
+
+@pytest.mark.asyncio
+async def test_removed_global_token_cannot_authenticate_subscription():
+    from app.api import export_subscription
+    from app.models import Setting
+    from starlette.requests import Request
+
+    async with create_test_env() as (db, admin, alice, bob):
+        db.add_all([Setting(key='require_token', value='true'), Setting(key='sub_hash_token', value='legacy-only-token')])
+        await db.commit()
+        request = Request({'type': 'http', 'method': 'GET', 'path': '/feed', 'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
+        with pytest.raises(HTTPException) as error:
+            await export_subscription(request=request, db=db, token='legacy-only-token', target='base64', type=None, name=None, title=None, t=None)
+        assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_new_source_records_platform_owner_and_creator(monkeypatch):
+    async with create_test_env() as (db, admin, alice, bob):
+        monkeypatch.setattr('app.api.sync_single_source', _mock_sync)
+        result = await admin_create_source(SourceCreate(name='new shared', url='https://example.test'), admin=admin, db=db)
+        source = await db.get(Source, result['id'])
+        assert source.owner_user_id is None
+        assert source.created_by_user_id == admin.id
+        result = await create_source(SourceCreate(name='new private', url='https://example.test'), user=alice, db=db)
+        source = await db.get(Source, result['id'])
+        assert source.owner_user_id == source.created_by_user_id == alice.id
+
+
+@pytest.mark.asyncio
+async def test_disabled_shared_node_cannot_be_pinged(monkeypatch):
+    from app.api import batch_ping_nodes, toggle_shared_source_for_user
+
+    async with create_test_env() as (db, admin, alice, bob):
+        await toggle_shared_source_for_user(source_id=10, user=admin, db=db)
+        with pytest.raises(HTTPException) as error:
+            await ping_node_endpoint(node_id=101, user=admin, db=db)
+        assert error.value.status_code == 404
+        result = await batch_ping_nodes(user=admin, db=db, payload=None)
+        assert result['total'] == 0

@@ -21,6 +21,7 @@
               {{ source.node_count }} 节点
             </span>
           </div>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">所有者：{{ source.owner_username }} · 创建人：{{ source.creator_username || '未知' }}</div>
           <div class="mt-2 text-xs font-mono text-slate-500 dark:text-slate-400 truncate" :title="source.url">
             {{ maskUrl(source.url) }}
           </div>
