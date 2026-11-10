@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import pytest
 from app.api import (
     BindOAuthPayload,
+    admin_list_users,
     user_bind_oauth,
     user_list_identities,
     user_unlink_identity,
@@ -220,3 +221,35 @@ async def test_prevent_unlinking_last_login_method_when_no_password():
 
             assert exc_info.value.status_code == 400
             assert "请先设置密码或绑定其他通行密钥" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_admin_list_users_displays_all_identities():
+    """验证管理员用户大盘能够正确加载并展示所有第三方外部身份 (解决 GitHub 绑定后显示为未绑定的 Bug)"""
+    async with create_test_env() as session_factory:
+        async with session_factory() as session:
+            admin = await session.get(User, 1)
+            # 为 admin 绑定 GitHub
+            session.add(
+                OAuthIdentity(
+                    id=77,
+                    user_id=1,
+                    provider="github",
+                    issuer="https://github.com",
+                    subject="128617637",
+                )
+            )
+            await session.commit()
+
+            users_list = await admin_list_users(admin=admin, db=session)
+            admin_item = next(u for u in users_list if u["id"] == 1)
+            assert admin_item["oauth_provider"] == "github"
+            assert len(admin_item["identities"]) == 1
+            assert admin_item["identities"][0]["provider"] == "github"
+            assert admin_item["identities"][0]["subject"] == "128617637"
+
+            # bob 绑定了 authentik
+            bob_item = next(u for u in users_list if u["id"] == 3)
+            assert "authentik" in bob_item["oauth_provider"]
+            assert len(bob_item["identities"]) >= 1
+            assert bob_item["identities"][0]["subject"] == "authentik-uid-bob"

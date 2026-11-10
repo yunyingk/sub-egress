@@ -145,6 +145,9 @@ async def github_oauth_callback(request: Request, db: Annotated[AsyncSession, De
         if not identity:
             identity = OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=subject)
             db.add(identity)
+        if not user.oauth_provider:
+            user.oauth_provider = "github"
+            user.oauth_id = subject
         user.last_login_at = datetime.now(UTC)
         await db.commit()
         response = RedirectResponse("/?msg=github_linked", status_code=302)
@@ -217,6 +220,10 @@ async def github_bind_login(
 
     if not existing_identity:
         db.add(OAuthIdentity(user_id=user.id, provider="github", issuer=GITHUB_OAUTH_ISSUER, subject=gh_id))
+
+    if not user.oauth_provider:
+        user.oauth_provider = "github"
+        user.oauth_id = gh_id
 
     user.last_login_at = datetime.now(UTC)
     await db.commit()
@@ -453,7 +460,7 @@ async def auth_sso_callback(
     x_authentik_uid: Annotated[str | None, Header()] = None,
 ):
     sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
-    sso_subject = (x_authentik_uid or "").strip()
+    sso_subject = (x_authentik_uid or x_authentik_username or x_forwarded_user or "").strip()
     if not sso_user or not sso_subject:
         # 若未携带 SSO 鉴权身份头，说明未经反代鉴权或已被拦截
         target_error = "sso_unauthorized"
@@ -928,7 +935,7 @@ async def user_bind_oauth(
     provider = (payload.provider or "authentik").strip().lower()
     if provider == "authentik":
         sso_user = (x_authentik_username or x_forwarded_user or "").strip().lower()
-        sso_subject = (x_authentik_uid or "").strip()
+        sso_subject = (x_authentik_uid or x_authentik_username or x_forwarded_user or "").strip()
         if not sso_user or not sso_subject:
             raise HTTPException(
                 status_code=400,
@@ -1105,12 +1112,37 @@ async def admin_list_users(
     admin: Annotated[User, Depends(get_current_admin)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    stmt = select(User).options(selectinload(User.passkeys)).order_by(User.id)
+    stmt = select(User).options(selectinload(User.passkeys), selectinload(User.identities)).order_by(User.id)
     res = await db.execute(stmt)
     users = res.scalars().all()
 
     results = []
     for u in users:
+        # 获取所有已绑定的第三方外部身份
+        user_identities = [
+            {
+                "id": i.id,
+                "provider": i.provider,
+                "subject": i.subject,
+                "issuer": i.issuer,
+                "created_at": i.created_at.isoformat() if i.created_at else None,
+            }
+            for i in u.identities
+        ]
+        # 兼容历史数据：若 u.oauth_provider 存在但未在 identities 中建档，平滑合并展示
+        providers_set = {i.provider for i in u.identities}
+        if u.oauth_provider and u.oauth_provider not in providers_set:
+            providers_set.add(u.oauth_provider)
+            user_identities.append({
+                "id": 0,
+                "provider": u.oauth_provider,
+                "subject": u.oauth_id or u.username,
+                "issuer": u.oauth_provider,
+                "created_at": None,
+            })
+
+        effective_provider = ", ".join(sorted(providers_set)) if providers_set else None
+
         results.append({
             "id": u.id,
             "username": u.username,
@@ -1120,7 +1152,9 @@ async def admin_list_users(
             "subscription_title": u.subscription_title,
             "clash_mixed_port": u.clash_mixed_port,
             "clash_terminal_port": u.clash_terminal_port,
-            "oauth_provider": u.oauth_provider,
+            "oauth_provider": effective_provider,
+            "oauth_id": u.oauth_id or (u.identities[0].subject if u.identities else None),
+            "identities": user_identities,
             "passkeys_count": len(u.passkeys),
             "passkeys": [
                 {

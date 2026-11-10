@@ -159,13 +159,19 @@
                   <span v-else class="text-[11px] text-slate-400">无</span>
                 </td>
                 <td class="px-4 py-3">
-                  <div v-if="u.oauth_provider" class="flex items-center gap-1.5 relative">
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-                      {{ u.oauth_provider }}
-                    </span>
-                    <div class="relative inline-block">
-                      <button @click.stop="toggleConfirm(`oauth-${u.id}`, `确定解除用户 [${u.username}] 的第三方 (${u.oauth_provider || 'Authentik'}) 绑定吗？`, () => unbindOAuth(u))" 
-                              title="解绑第三方" 
+                  <div v-if="(u.identities && u.identities.length) || u.oauth_provider" class="flex flex-wrap items-center gap-1.5">
+                    <div v-for="idItem in (u.identities && u.identities.length ? u.identities : [{ provider: u.oauth_provider, subject: u.oauth_id }])"
+                         :key="idItem.provider + (idItem.id || idItem.subject || '')"
+                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
+                         :class="idItem.provider === 'github' ? 'bg-slate-100 dark:bg-slate-750 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600' : 'bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800'">
+                      <i :class="idItem.provider === 'github' ? 'fa-brands fa-github' : 'fa-solid fa-id-card-clip'"></i>
+                      <span>{{ idItem.provider }}</span>
+                      <span v-if="idItem.subject" class="font-mono text-[9px] opacity-75">({{ idItem.subject }})</span>
+                    </div>
+
+                    <div class="relative inline-block ml-0.5">
+                      <button @click.stop="toggleConfirm(`oauth-${u.id}`, `确定解除用户 [${u.username}] 的第三方授权绑定吗？`, () => unbindOAuth(u))" 
+                              title="解除第三方授权" 
                               class="text-rose-400 hover:text-rose-600 p-0.5 cursor-pointer">
                         <i class="fa-solid fa-link-slash"></i>
                       </button>
@@ -509,6 +515,7 @@ export default {
         const res = await fetch(`/api/admin/users/${user.id}/unbind-oauth`, { method: 'POST' });
         if (res.ok) {
           user.oauth_provider = null;
+          user.identities = [];
           successMessage.value = `用户 ${user.username} 的第三方绑定已解除`;
         } else {
           const data = await res.json();
