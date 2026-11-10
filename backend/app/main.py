@@ -3,10 +3,11 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import router
 from .db import init_db
@@ -43,6 +44,16 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+@app.exception_handler(404)
+@app.exception_handler(StarletteHTTPException)
+async def global_not_found_fallback(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404:
+        # 对 /api/ 接口保留标准的 404 JSON 响应，其余所有网页、异常乱输路径全局兜底 302 重定向到根目录 /
+        if request.url.path.startswith("/api/"):
+            return JSONResponse(status_code=404, content={"detail": exc.detail or "API route not found"})
+        return RedirectResponse(url="/", status_code=302)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 # Mount frontend static directory & clean URL routing
 frontend_dir = Path(os.getenv("FRONTEND_DIR", "/frontend"))

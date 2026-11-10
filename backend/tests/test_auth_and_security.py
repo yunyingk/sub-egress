@@ -203,3 +203,25 @@ async def test_github_bind_login_flow():
     finally:
         await engine.dispose()
 
+
+@pytest.mark.asyncio
+async def test_global_404_fallback():
+    import httpx
+    from app.main import app
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", follow_redirects=False) as client:
+        # 1. 任意未匹配的页面路径（如 /a, /random-page）应 302 重定向到根目录 /
+        res = await client.get("/a")
+        assert res.status_code == 302
+        assert res.headers["location"] == "/"
+
+        res2 = await client.get("/random-unknown-page")
+        assert res2.status_code == 302
+        assert res2.headers["location"] == "/"
+
+        # 2. 未匹配的 /api/ 接口路径应保留标准的 404 JSON
+        api_res = await client.get("/api/nonexistent-endpoint")
+        assert api_res.status_code == 404
+        assert api_res.headers["content-type"].startswith("application/json")
+
+
