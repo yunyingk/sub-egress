@@ -34,7 +34,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: backend
-        run: uv run --locked --extra dev python -m pytest backend/tests -q
+        run: uv run --locked --extra dev python -m pytest tests backend/tests -q
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
