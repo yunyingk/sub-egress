@@ -49,6 +49,21 @@ DEFAULT_SNIFFER_CONFIG = {
     }
 }
 
+DEFAULT_GOOGLE_PROXY_DOMAINS = (
+    "google.com",
+    "googleapis.com",
+    "gstatic.com",
+    "googleusercontent.com",
+    "gvt1.com",
+    "gvt2.com",
+    "withgoogle.com",
+    "ggpht.com",
+    "google",
+    "ai.google.dev",
+    "g.co",
+    "goo.gl",
+)
+
 DEFAULT_RULES = [
     # 1. 基础广告过滤
     "GEOSITE,category-ads-all,REJECT",
@@ -93,18 +108,19 @@ DEFAULT_RULES = [
     "DOMAIN,challenges.cloudflare.com,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,statsig.com,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,featuregates.org,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,gemini.google.com,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,x.ai,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,grok.com,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,perplexity.ai,__MAIN_PROXY__",
-    # 7. IP 与 DNS 泄露检测站点
+    # 7. Google 核心服务与终端地区校验域名 (置于 GEOSITE/GEOIP,CN 之前，防止解析到国内节点直连泄露)
+    *[f"DOMAIN-SUFFIX,{domain},__MAIN_PROXY__" for domain in DEFAULT_GOOGLE_PROXY_DOMAINS],
+    # 8. IP 与 DNS 泄露检测站点
     "DOMAIN-SUFFIX,browserleaks.com,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,ipleak.net,__MAIN_PROXY__",
     "DOMAIN-SUFFIX,dnsleaktest.com,__MAIN_PROXY__",
-    # 8. 中国大陆网站与 IP 直连
+    # 9. 中国大陆网站与 IP 直连
     "GEOSITE,cn,DIRECT",
     "GEOIP,CN,DIRECT",
-    # 9. 全局兜底
+    # 10. 全局兜底
     "MATCH,__MAIN_PROXY__"
 ]
 
@@ -614,6 +630,8 @@ def build_singbox_config(
         else:
             match["outbound"] = {"DIRECT": "direct", "PROXY": "PROXY", "__MAIN_PROXY__": "PROXY"}.get(target_key, target)
         route_rules.append(match)
+
+    route_rules.append({"domain_suffix": list(DEFAULT_GOOGLE_PROXY_DOMAINS), "outbound": "PROXY"})
 
     geoip_cn = add_rule_set("geoip", "cn")
     geosite_cn = add_rule_set("geosite", "cn")
