@@ -275,8 +275,9 @@ export default {
         const container = qrContainerRef.value;
         if (!container) return;
         container.innerHTML = '';
+        const text = qrPayload.value.text;
+        if (!text) return;
         if (window.QRCode) {
-          const text = qrPayload.value.text;
           const correctLevel =
             qrPayload.value.mode === 'scheme' || text.length > 140
               ? window.QRCode.CorrectLevel.L
@@ -330,6 +331,7 @@ export default {
     });
 
     const copySubscriptionUrl = () => {
+      if (!activeSubscriptionUrl.value) return;
       navigator.clipboard.writeText(activeSubscriptionUrl.value);
       copied.value = true;
       setTimeout(() => { copied.value = false; }, 2500);

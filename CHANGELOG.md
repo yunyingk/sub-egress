@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-11-26
+
+### Security
+- **Enforce Token-Only Subscriptions**: Remove the unauthenticated `/feed` endpoint and the `require_token=false` loose mode; all subscription exports now require a valid, active user token via `/c/{token}`.
+
+### Fixed
+- **Admin Settings Write Token**: Preserve the existing `write_api_token` when saving global admin settings with the token field left blank.
+
 ## [0.6.3] - 2026-11-26
 
 ### Fixed

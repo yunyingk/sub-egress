@@ -55,6 +55,9 @@ export function normalizeTarget(target) {
  * Build the HTTPS subscription endpoint URL for a specific target format.
  */
 export function buildSubscriptionUrl({ origin, token, target, customName } = {}) {
+  if (!token) {
+    return '';
+  }
   const normalized = normalizeTarget(target);
   const params = new URLSearchParams();
   params.append('target', normalized);
@@ -62,16 +65,16 @@ export function buildSubscriptionUrl({ origin, token, target, customName } = {})
     params.append('name', customName.trim());
   }
   const queryStr = params.toString();
-  if (token) {
-    return `${origin}/c/${token}?${queryStr}`;
-  }
-  return `${origin}/feed?${queryStr}`;
+  return `${origin}/c/${token}?${queryStr}`;
 }
 
 /**
  * Build the client deep-link scheme URL bound strictly to the given target format.
  */
 export function buildClientSchemeUrl({ target, origin, token, customName, defaultTitle } = {}) {
+  if (!token) {
+    return null;
+  }
   const normalized = normalizeTarget(target);
   const profileName = (customName && customName.trim()) || defaultTitle || 'sub-egress';
 

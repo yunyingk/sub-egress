@@ -46,16 +46,16 @@ async def test_export_formats_respect_ownership_and_both_shared_switches(target)
             db.add(Node(source_id=source.id, original_name=source.name, display_name=source.name,
                         node_type='ss', server=server, port=443, config_json=shadowsocks(server)))
         await db.commit()
-        request = Request({'type': 'http', 'method': 'GET', 'path': '/feed',
+        request = Request({'type': 'http', 'method': 'GET', 'path': f'/c/{alice.sub_hash_token}',
                            'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
         response = await export_subscription(request=request, db=db, token=alice.sub_hash_token,
-                                             target=target, type=None, name=None, title=None, t=None)
+                                             target=target, type=None, name=None, title=None)
         assert response.status_code == 200
         assert hosts_from_response(response, target) == {'active.example.test', 'alice-private.example.test'}
         alice.disabled_shared_sources = ''
         await db.commit()
         response = await export_subscription(request=request, db=db, token=alice.sub_hash_token,
-                                             target=target, type=None, name=None, title=None, t=None)
+                                             target=target, type=None, name=None, title=None)
         assert hosts_from_response(response, target) == {
             'active.example.test', 'user-disabled.example.test', 'alice-private.example.test'
         }

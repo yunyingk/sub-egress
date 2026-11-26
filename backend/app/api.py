@@ -233,7 +233,6 @@ async def github_bind_login(
 
 
 DEFAULT_SETTINGS = {
-    "require_token": "false",
     "default_target": "clash",
     "update_interval": "12",
     "write_api_token": "sec_7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
@@ -1033,7 +1032,6 @@ class AdminGlobalRulesPayload(BaseModel):
     admin_rules: str = ""
 
 class AdminGlobalSettingsPayload(BaseModel):
-    require_token: bool
     default_target: str
     update_interval: int
     write_api_token: str | None = None
@@ -1041,14 +1039,18 @@ class AdminGlobalSettingsPayload(BaseModel):
 @router.get("/api/admin/settings", summary="读取管理员全局设置")
 async def admin_get_settings(admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
     settings = await get_system_settings(db)
-    return {"require_token": settings.get("require_token", "false").lower() == "true", "default_target": settings.get("default_target", "clash"), "update_interval": settings.get("update_interval", "12"), "write_api_token_configured": bool(settings.get("write_api_token"))}
+    return {
+        "default_target": settings.get("default_target", "clash"),
+        "update_interval": settings.get("update_interval", "12"),
+        "write_api_token_configured": bool(settings.get("write_api_token")),
+    }
 
 @router.put("/api/admin/settings", summary="更新管理员全局设置")
 async def admin_put_settings(payload: AdminGlobalSettingsPayload, admin: Annotated[User, Depends(get_current_admin)], db: Annotated[AsyncSession, Depends(get_db)]):
     if payload.default_target not in {"clash", "sing-box", "base64"} or not 1 <= payload.update_interval <= 72:
         raise HTTPException(status_code=400, detail="默认内核或更新间隔无效")
-    values = {"require_token": "true" if payload.require_token else "false", "default_target": payload.default_target, "update_interval": str(payload.update_interval)}
-    if payload.write_api_token is not None:
+    values = {"default_target": payload.default_target, "update_interval": str(payload.update_interval)}
+    if payload.write_api_token is not None and payload.write_api_token.strip():
         values["write_api_token"] = payload.write_api_token.strip()
     for key, value in values.items():
         result = await db.execute(select(Setting).where(Setting.key == key))
@@ -1471,38 +1473,37 @@ async def admin_refresh_source(
 # ==================== 下游订阅分发端点 (多用户订阅隔离与客户端直连) ====================
 
 @router.head("/c/{token}", include_in_schema=False)
-@router.head("/feed", include_in_schema=False)
 @router.get("/c/{token}", summary="基于专属安全令牌的统一订阅调度端点")
-@router.get("/feed", summary="标准统一订阅调度端点")
 async def export_subscription(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    token: str | None = None,
+    token: str,
     target: Annotated[str | None, Query(description="目标客户端内核: clash, sing-box, base64")] = None,
     type: Annotated[str | None, Query(description="别名目标内核: clash, sing-box, base64")] = None,
     name: Annotated[str | None, Query(description="自定义订阅卡片名称 (显示在客户端)")] = None,
     title: Annotated[str | None, Query(description="自定义订阅卡片名称 (别名)")] = None,
-    t: Annotated[str | None, Query(description="Query 传递的安全令牌 (用于 /feed)")] = None,
 ):
     settings = await get_system_settings(db)
-    req_token = token or t
+    req_token = token.strip()
 
-    # 1. 根据专属 Token 查找对应用户 (实现多用户资源隔离)
-    matched_user: User | None = None
-    if req_token:
-        u_stmt = select(User).where(User.sub_hash_token == req_token)
-        u_res = await db.execute(u_stmt)
-        matched_user = u_res.scalar_one_or_none()
+    # 1. 强制校验专属安全令牌与账号启用状态 (实现严格的多用户资源隔离)
+    if not req_token:
+        raise HTTPException(
+            status_code=403,
+            detail="403 Forbidden: Invalid or missing subscription security hash token"
+        )
 
-    # 读权限安全检查
-    if req_token or settings.get("require_token", "false").lower() == "true":
-        if not matched_user:
-            raise HTTPException(
-                status_code=403,
-                detail="403 Forbidden: Invalid or missing subscription security hash token"
-            )
+    u_stmt = select(User).where(User.sub_hash_token == req_token)
+    u_res = await db.execute(u_stmt)
+    matched_user = u_res.scalar_one_or_none()
 
-    if matched_user and not matched_user.is_active:
+    if not matched_user:
+        raise HTTPException(
+            status_code=403,
+            detail="403 Forbidden: Invalid or missing subscription security hash token"
+        )
+
+    if not matched_user.is_active:
         raise HTTPException(status_code=403, detail="403 Forbidden: Account is deactivated")
 
     # 确定目标导出内核
@@ -1515,22 +1516,19 @@ async def export_subscription(
         final_target = "clash"
 
     # 多租户节点源过滤：提取公共共享源（排除用户个人禁用的共享源）+ 用户私有源
+    disabled_shared = matched_user.get_disabled_shared_source_ids()
     stmt = (
         select(Node, Source.name.label("source_name"))
         .join(Source, Node.source_id == Source.id)
         .where(Source.enabled.is_(True), Source.deleted_at.is_(None))
     )
-    if matched_user:
-        disabled_shared = matched_user.get_disabled_shared_source_ids()
-        if disabled_shared:
-            stmt = stmt.where(
-                ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
-                | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id))
-            )
-        else:
-            stmt = stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id)))
+    if disabled_shared:
+        stmt = stmt.where(
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
+            | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id))
+        )
     else:
-        stmt = stmt.where(Source.is_shared.is_(True))
+        stmt = stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id)))
 
     stmt = stmt.order_by(Node.country_code, Node.id)
     result = await db.execute(stmt)
@@ -1547,13 +1545,13 @@ async def export_subscription(
 
     # 计算总流量与到期时间
     src_stmt = select(Source).where(Source.enabled.is_(True), Source.deleted_at.is_(None))
-    if matched_user:
+    if disabled_shared:
         src_stmt = src_stmt.where(
-            ((Source.is_shared.is_(True)) & (~Source.id.in_(matched_user.get_disabled_shared_source_ids())))
+            ((Source.is_shared.is_(True)) & (~Source.id.in_(disabled_shared)))
             | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id))
         )
     else:
-        src_stmt = src_stmt.where(Source.is_shared.is_(True))
+        src_stmt = src_stmt.where((Source.is_shared.is_(True)) | ((Source.is_shared.is_(False)) & (Source.owner_user_id == matched_user.id)))
 
     src_res = await db.execute(src_stmt)
     sources = src_res.scalars().all()
@@ -1564,28 +1562,28 @@ async def export_subscription(
     earliest_expire = min(valid_expires) if valid_expires else int(time.time()) + 86400 * 365
 
     # 用户个性化卡片标题与端口
-    display_profile_title = name or title or (matched_user.subscription_title if matched_user else settings.get("subscription_title", "sub-egress"))
-    mixed_port = matched_user.clash_mixed_port if matched_user else settings.get("clash_mixed_port", "7897")
-    terminal_port = matched_user.clash_terminal_port if matched_user else settings.get("clash_terminal_port", "7898")
+    display_profile_title = name or title or matched_user.subscription_title
+    mixed_port = matched_user.clash_mixed_port
+    terminal_port = matched_user.clash_terminal_port
 
     # 用户级 / 全局分流规则与直连域名 (最高优先级)
     user_direct_raw = (
         matched_user.custom_direct_domains
-        if (matched_user and matched_user.custom_direct_domains is not None)
+        if matched_user.custom_direct_domains is not None
         else settings.get("custom_direct_domains", "ying-qing.cn")
     )
     direct_domains = [d.strip() for d in (settings.get("admin_direct_domains", "") + "," + (user_direct_raw or "")).replace("\n", ",").replace(";", ",").split(",") if d.strip()]
 
     user_proxy_raw = (
         matched_user.custom_proxy_domains
-        if (matched_user and matched_user.custom_proxy_domains is not None)
+        if matched_user.custom_proxy_domains is not None
         else settings.get("custom_proxy_domains", "")
     )
     proxy_domains = [d.strip() for d in (settings.get("admin_proxy_domains", "") + "," + (user_proxy_raw or "")).replace("\n", ",").replace(";", ",").split(",") if d.strip()]
 
     user_rules_raw = (
         matched_user.custom_rules
-        if (matched_user and matched_user.custom_rules is not None)
+        if matched_user.custom_rules is not None
         else settings.get("custom_rules", "")
     )
     custom_rules_list = [r.strip() for r in (settings.get("admin_rules", "") + "\n" + (user_rules_raw or "")).splitlines() if r.strip() and not r.strip().startswith("#")]
@@ -1679,7 +1677,6 @@ async def get_settings(user: Annotated[User, Depends(get_current_user)], db: Ann
     return {
         "version": VERSION,
         "sub_hash_token": u_token,
-        "require_token": settings.get("require_token", "false").lower() == "true",
         "default_target": settings.get("default_target", "clash"),
         "update_interval": settings.get("update_interval", "12"),
         "write_api_token": "",

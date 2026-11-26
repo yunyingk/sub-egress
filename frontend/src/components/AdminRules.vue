@@ -59,20 +59,21 @@
           <p class="text-[10px] text-slate-400 mt-1">客户端订阅推荐刷新周期 (1~72h)</p>
         </div>
 
-        <!-- 必须携带令牌 -->
+        <!-- 访问安全要求 (固定强制鉴权) -->
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">访问安全要求</label>
-          <label class="flex items-center gap-2 px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer h-[34px]">
-            <input v-model="settings.require_token" type="checkbox" class="w-3.5 h-3.5 text-sky-600 rounded">
-            <span>订阅必须携带令牌</span>
-          </label>
-          <p class="text-[10px] text-slate-400 mt-1">开启后未授权或匿名请求将被直接拒绝</p>
+          <div class="flex items-center gap-2 px-3 py-2 text-xs rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 h-[34px]">
+            <i class="fa-solid fa-shield-halved shrink-0"></i>
+            <span class="font-medium truncate">已强制启用专属令牌鉴权</span>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-1">所有订阅请求必须携带合法用户令牌，/feed 匿名入口已停用</p>
         </div>
 
         <!-- 写入 API Token -->
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">写入 API Token</label>
-          <input v-model="settings.write_api_token" type="password" autocomplete="new-password" placeholder="留空保持当前值不变" 
+          <input v-model="settings.write_api_token" type="password" autocomplete="new-password"
+                 :placeholder="settings.write_api_token_configured ? '已配置，留空保持当前值不变' : '未配置，输入新值后保存'"
                  class="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
           <p class="text-[10px] text-slate-400 mt-1">外部脚本/CI 写入节点时的凭据</p>
         </div>
@@ -158,10 +159,10 @@ export default {
     });
 
     const settings = reactive({
-      require_token: false,
       default_target: 'clash',
       update_interval: 12,
-      write_api_token: ''
+      write_api_token: '',
+      write_api_token_configured: false
     });
 
     const loading = ref(false);
@@ -212,14 +213,27 @@ export default {
           throw new Error(data.detail || '保存规则失败');
         }
 
+        const settingsPayload = {
+          default_target: settings.default_target,
+          update_interval: settings.update_interval
+        };
+        const trimmedToken = settings.write_api_token.trim();
+        if (trimmedToken) {
+          settingsPayload.write_api_token = trimmedToken;
+        }
+
         const settingsResponse = await fetch('/api/admin/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings)
+          body: JSON.stringify(settingsPayload)
         });
         if (!settingsResponse.ok) {
           const data = await settingsResponse.json();
           throw new Error(data.detail || '保存全局设置失败');
+        }
+        if (trimmedToken) {
+          settings.write_api_token_configured = true;
+          settings.write_api_token = '';
         }
 
         message.value = '全局规则与设置已成功保存！所有客户端订阅将实时生效。';

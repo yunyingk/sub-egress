@@ -65,8 +65,14 @@ test('buildSubscriptionUrl constructs distinct target URLs with and without toke
   assert.equal(base64, `${ORIGIN}/c/${TOKEN}?target=base64&name=My+Node`);
   assert.equal(new Set([clash, singbox, base64]).size, 3);
 
-  const feedUrl = buildSubscriptionUrl({ origin: ORIGIN, token: '', target: 'sing-box', customName: '' });
-  assert.equal(feedUrl, `${ORIGIN}/feed?target=sing-box`);
+  assert.equal(
+    buildSubscriptionUrl({ origin: ORIGIN, token: '', target: 'sing-box', customName: '' }),
+    ''
+  );
+  assert.equal(
+    buildClientSchemeUrl({ target: 'clash', origin: ORIGIN, token: '', customName: '', defaultTitle: 'sub-egress' }),
+    null
+  );
 });
 
 test('buildClientSchemeUrl locks each scheme to its matching target format', () => {

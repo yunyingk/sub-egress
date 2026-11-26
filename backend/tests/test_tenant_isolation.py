@@ -271,7 +271,7 @@ async def test_admin_can_disable_own_created_shared_source_and_statistics():
         await toggle_shared_source_for_user(source_id=10, user=admin, db=db)
         assert not (await list_nodes(user=admin, db=db))["nodes"]
         request = Request({"type": "http", "method": "GET", "path": "/c/admin-token", "headers": [(b"host", b"example.test")], "scheme": "https", "query_string": b""})
-        response = await export_subscription(request=request, db=db, token=admin.sub_hash_token, target="base64", type=None, name=None, title=None, t=None)
+        response = await export_subscription(request=request, db=db, token=admin.sub_hash_token, target="base64", type=None, name=None, title=None)
         assert response.body == b""
         assert 'subscription-userinfo' not in response.headers
 
@@ -294,12 +294,61 @@ async def test_removed_global_token_cannot_authenticate_subscription():
     from starlette.requests import Request
 
     async with create_test_env() as (db, admin, alice, bob):
-        db.add_all([Setting(key='require_token', value='true'), Setting(key='sub_hash_token', value='legacy-only-token')])
+        db.add_all([Setting(key='require_token', value='false'), Setting(key='sub_hash_token', value='legacy-only-token')])
         await db.commit()
-        request = Request({'type': 'http', 'method': 'GET', 'path': '/feed', 'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
-        with pytest.raises(HTTPException) as error:
-            await export_subscription(request=request, db=db, token='legacy-only-token', target='base64', type=None, name=None, title=None, t=None)
-        assert error.value.status_code == 403
+        for tok in ('legacy-only-token', '', 'unknown-token'):
+            request = Request({'type': 'http', 'method': 'GET', 'path': f'/c/{tok}', 'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
+            with pytest.raises(HTTPException) as error:
+                await export_subscription(request=request, db=db, token=tok, target='base64', type=None, name=None, title=None)
+            assert error.value.status_code == 403
+
+
+def test_feed_route_is_removed():
+    from app.api import router
+
+    paths = {route.path for route in router.routes}
+    assert '/feed' not in paths
+    assert '/c/{token}' in paths
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_blank_write_token_preserves_existing_value():
+    from app.api import (
+        AdminGlobalSettingsPayload,
+        admin_get_settings,
+        admin_put_settings,
+    )
+    from app.models import Setting
+    from sqlalchemy import select
+
+    async with create_test_env() as (db, admin, alice, bob):
+        await admin_put_settings(
+            AdminGlobalSettingsPayload(default_target='clash', update_interval=12, write_api_token='initial-write-secret'),
+            admin=admin,
+            db=db,
+        )
+        await admin_put_settings(
+            AdminGlobalSettingsPayload(default_target='sing-box', update_interval=6, write_api_token='   '),
+            admin=admin,
+            db=db,
+        )
+        await admin_put_settings(
+            AdminGlobalSettingsPayload(default_target='clash', update_interval=8, write_api_token=None),
+            admin=admin,
+            db=db,
+        )
+        row = (await db.execute(select(Setting).where(Setting.key == 'write_api_token'))).scalar_one()
+        assert row.value == 'initial-write-secret'
+        info = await admin_get_settings(admin=admin, db=db)
+        assert info['write_api_token_configured'] is True
+
+        await admin_put_settings(
+            AdminGlobalSettingsPayload(default_target='clash', update_interval=12, write_api_token='rotated-write-secret'),
+            admin=admin,
+            db=db,
+        )
+        row = (await db.execute(select(Setting).where(Setting.key == 'write_api_token'))).scalar_one()
+        assert row.value == 'rotated-write-secret'
 
 
 @pytest.mark.asyncio

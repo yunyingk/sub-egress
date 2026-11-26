@@ -76,10 +76,10 @@ async def test_anytls_export_from_database_filters_deleted_sources():
             db.add(Node(id=sid, source_id=sid, original_name='node', display_name=f'node-{sid}',
                         node_type='anytls', server=cfg['server'], port=443, config_json=cfg))
         await db.commit()
-        request = Request({'type': 'http', 'method': 'GET', 'path': '/feed', 'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
+        request = Request({'type': 'http', 'method': 'GET', 'path': f'/c/{user.sub_hash_token}', 'headers': [(b'host', b'example.test')], 'scheme': 'https', 'query_string': b''})
         for target in ('sing-box', 'base64'):
             response = await export_subscription(request=request, db=db, token=user.sub_hash_token,
-                                                 target=target, type=None, name=None, title=None, t=None)
+                                                 target=target, type=None, name=None, title=None)
             if target == 'sing-box':
                 nodes = [x for x in json.loads(response.body)['outbounds'] if x['type'] == 'anytls']
                 assert [x['server'] for x in nodes] == ['node-1.example.test']

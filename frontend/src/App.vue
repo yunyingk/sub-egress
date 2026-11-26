@@ -262,7 +262,6 @@ export default {
 
     const settings = ref({
       sub_hash_token: '',
-      require_token: false,
       default_target: 'clash',
       update_interval: '12',
       write_api_token: '',

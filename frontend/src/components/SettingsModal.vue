@@ -164,18 +164,6 @@
               </div>
             </div>
 
-            <!-- 访问控制模式 -->
-            <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span class="text-xs font-bold text-slate-800 dark:text-slate-200 block">强制携带安全令牌 (Token Enforce)</span>
-                <span class="text-[11px] text-slate-500 dark:text-slate-400 block">开启后，未携带合法安全令牌的访问将直接返回 403 阻断；关闭则为宽松模式。</span>
-              </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input v-model="editSettings.require_token" type="checkbox" class="sr-only peer">
-                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
-              </label>
-            </div>
-
             <!-- 写入管理 API Token -->
             <div>
               <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">管理写入 API Key (Write Token)</label>
