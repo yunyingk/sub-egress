@@ -81,9 +81,11 @@
               <span>{{ copied ? '已成功复制!' : '复制订阅链接' }}</span>
             </button>
 
-            <!-- 2. 二维码扫码 (带悬浮/点击展示) -->
-            <div class="relative" @mouseenter="onMouseEnterQr" @mouseleave="onMouseLeaveQr">
-              <button @click="toggleQr" 
+            <!-- 2. 二维码扫码 (点击切换，按当前格式动态生成) -->
+            <div ref="qrWrapperRef" class="relative">
+              <button type="button"
+                      @click.stop="toggleQr"
+                      :aria-expanded="showQr"
                       :class="showQr ? 'bg-sky-50 dark:bg-sky-950/60 border-sky-400 text-sky-600 dark:text-sky-300' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'"
                       class="w-full px-3 py-2 text-xs font-semibold rounded-lg border transition flex items-center justify-center gap-1.5 shadow-xs">
                 <i class="fa-solid fa-qrcode text-sky-500 text-sm"></i>
@@ -91,33 +93,59 @@
               </button>
 
               <!-- 二维码浮层卡片 -->
-              <div v-show="showQr" 
-                   class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-30 transition-all">
-                <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-100 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200">
+              <div v-show="showQr"
+                   @click.stop
+                   class="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-76 p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-30 transition-all">
+                <div class="flex items-center justify-between gap-2 pb-2.5 mb-3 border-b border-slate-100 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200">
                   <span class="flex items-center gap-1.5">
                     <i class="fa-solid fa-mobile-screen text-sky-500"></i>
-                    移动设备扫码导入
+                    扫码导入
                   </span>
-                  <button @click.stop="showQr = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-                    <i class="fa-solid fa-xmark"></i>
+                  <div class="flex items-center gap-1.5">
+                    <span :class="qrPayload.meta.badgeClass"
+                          class="px-2 py-0.5 text-[10px] font-semibold rounded-full border">
+                      {{ qrPayload.meta.label }}
+                    </span>
+                    <button type="button" @click.stop="showQr = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 二维码内容模式切换（Clash / Sing-box 支持订阅链接与一键导入码） -->
+                <div v-if="qrPayload.meta.supportsScheme"
+                     class="grid grid-cols-2 gap-1 p-1 mb-3 bg-slate-100 dark:bg-slate-900/80 rounded-lg border border-slate-200 dark:border-slate-700/70">
+                  <button type="button"
+                          @click="setQrMode('url')"
+                          :class="qrPayload.mode === 'url' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-semibold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'"
+                          class="py-1 text-[11px] rounded-md transition">
+                    订阅链接
+                  </button>
+                  <button type="button"
+                          @click="setQrMode('scheme')"
+                          :class="qrPayload.mode === 'scheme' ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-xs font-semibold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'"
+                          class="py-1 text-[11px] rounded-md transition">
+                    一键导入码
                   </button>
                 </div>
 
                 <!-- 二维码容器 (白色衬底保证高对比度扫码) -->
-                <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-inner flex items-center justify-center mx-auto w-[196px] h-[196px]">
-                  <div id="qrcode-container-box" class="flex items-center justify-center"></div>
+                <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-inner flex items-center justify-center mx-auto w-[204px] h-[204px]">
+                  <div ref="qrContainerRef" class="flex items-center justify-center"></div>
                 </div>
 
                 <div class="mt-3 text-center space-y-1.5">
+                  <div class="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                    {{ qrPayload.meta.formatLabel }} · {{ qrPayload.payloadLabel }}
+                  </div>
                   <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                    手机相机扫码即可导入客户端
+                    {{ qrPayload.hint }}
                   </p>
-                  <div class="pt-1 flex items-center justify-center gap-2">
-                    <a :href="clashSchemeUrl" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition">
-                      Clash 一键导入
-                    </a>
-                    <a :href="singboxSchemeUrl" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition">
-                      Sing-box 导入
+                  <div v-if="qrPayload.schemeUrl" class="pt-1 flex items-center justify-center">
+                    <a :href="qrPayload.schemeUrl"
+                       :class="qrPayload.meta.importButtonClass"
+                       class="px-3 py-1 text-[11px] font-semibold rounded-md border transition">
+                      {{ qrPayload.meta.importLabel }}
                     </a>
                   </div>
                 </div>
@@ -167,7 +195,8 @@
 </template>
 
 <script>
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { buildSubscriptionUrl, resolveQrPayload } from '../utils/subscription.js';
 
 export default {
   name: 'OutboundFeed',
@@ -179,6 +208,9 @@ export default {
   setup(props, { emit }) {
     const copied = ref(false);
     const showQr = ref(false);
+    const qrMode = ref('url');
+    const qrWrapperRef = ref(null);
+    const qrContainerRef = ref(null);
     const resettingToken = ref(false);
     const tokenResetMessage = ref('');
     const tokenResetError = ref(false);
@@ -202,7 +234,6 @@ export default {
         resettingToken.value = false;
       }
     };
-    let hoverTimeout = null;
     const customName = ref(localStorage.getItem('sub_egress_custom_name') || '');
 
     const onNameChange = () => {
@@ -218,48 +249,45 @@ export default {
     });
 
     const activeSubscriptionUrl = computed(() => {
-      const origin = window.location.origin;
-      const token = props.settings.sub_hash_token;
-      const target = props.selectedTarget;
-      const params = new URLSearchParams();
-      params.append('target', target);
-      if (customName.value && customName.value.trim()) {
-        params.append('name', customName.value.trim());
-      }
-      const queryStr = params.toString();
-      if (token) {
-        return `${origin}/c/${token}?${queryStr}`;
-      }
-      return `${origin}/feed?${queryStr}`;
+      return buildSubscriptionUrl({
+        origin: window.location.origin,
+        token: props.settings.sub_hash_token,
+        target: props.selectedTarget,
+        customName: customName.value
+      });
     });
 
-    const formatExt = computed(() => {
-      if (props.selectedTarget === 'sing-box') return 'JSON (Sing-box)';
-      if (props.selectedTarget === 'base64') return 'TXT (Base64)';
-      return 'YAML (Mihomo)';
+    const qrPayload = computed(() => {
+      return resolveQrPayload({
+        target: props.selectedTarget,
+        qrMode: qrMode.value,
+        origin: window.location.origin,
+        token: props.settings.sub_hash_token,
+        customName: customName.value,
+        defaultTitle: defaultPlaceholder.value
+      });
     });
 
-    const clashSchemeUrl = computed(() => {
-      return `clash://install-config?url=${encodeURIComponent(activeSubscriptionUrl.value)}&name=${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
-    });
-
-    const singboxSchemeUrl = computed(() => {
-      return `sing-box://import-remote-profile?url=${encodeURIComponent(activeSubscriptionUrl.value)}#${encodeURIComponent(customName.value || defaultPlaceholder.value)}`;
-    });
+    const formatExt = computed(() => qrPayload.value.meta.formatLabel);
 
     const renderQrCode = () => {
       nextTick(() => {
-        const container = document.getElementById('qrcode-container-box');
+        const container = qrContainerRef.value;
         if (!container) return;
         container.innerHTML = '';
         if (window.QRCode) {
+          const text = qrPayload.value.text;
+          const correctLevel =
+            qrPayload.value.mode === 'scheme' || text.length > 140
+              ? window.QRCode.CorrectLevel.L
+              : window.QRCode.CorrectLevel.M;
           new window.QRCode(container, {
-            text: activeSubscriptionUrl.value,
-            width: 170,
-            height: 170,
+            text,
+            width: 180,
+            height: 180,
             colorDark: "#0f172a",
             colorLight: "#ffffff",
-            correctLevel: window.QRCode.CorrectLevel.M
+            correctLevel
           });
         }
       });
@@ -270,19 +298,34 @@ export default {
       if (showQr.value) renderQrCode();
     };
 
-    const onMouseEnterQr = () => {
-      clearTimeout(hoverTimeout);
-      showQr.value = true;
-      renderQrCode();
+    const setQrMode = (mode) => {
+      qrMode.value = mode;
+      if (showQr.value) renderQrCode();
     };
 
-    const onMouseLeaveQr = () => {
-      hoverTimeout = setTimeout(() => {
+    const handleDocumentClick = (e) => {
+      if (showQr.value && qrWrapperRef.value && !qrWrapperRef.value.contains(e.target)) {
         showQr.value = false;
-      }, 300);
+      }
     };
 
-    watch(activeSubscriptionUrl, () => {
+    const handleDocumentKeydown = (e) => {
+      if (e.key === 'Escape' && showQr.value) {
+        showQr.value = false;
+      }
+    };
+
+    onMounted(() => {
+      document.addEventListener('click', handleDocumentClick);
+      document.addEventListener('keydown', handleDocumentKeydown);
+    });
+
+    onBeforeUnmount(() => {
+      document.removeEventListener('click', handleDocumentClick);
+      document.removeEventListener('keydown', handleDocumentKeydown);
+    });
+
+    watch(() => qrPayload.value.text, () => {
       if (showQr.value) renderQrCode();
     });
 
@@ -299,6 +342,8 @@ export default {
     return {
       copied,
       showQr,
+      qrWrapperRef,
+      qrContainerRef,
       resettingToken,
       tokenResetMessage,
       tokenResetError,
@@ -307,12 +352,10 @@ export default {
       onNameChange,
       defaultPlaceholder,
       activeSubscriptionUrl,
+      qrPayload,
       formatExt,
-      clashSchemeUrl,
-      singboxSchemeUrl,
       toggleQr,
-      onMouseEnterQr,
-      onMouseLeaveQr,
+      setQrMode,
       copySubscriptionUrl,
       setTarget
     };

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-11-26
+
+### Fixed
+- **Subscription QR Code & Import Actions**: Bind the QR popover strictly to the active target format (`Clash / Mihomo`, `Sing-box`, `Base64 / URI`) with a clear format badge, target-locked client deep-link buttons, an optional HTTPS URL vs client scheme (`clash://` / `sing-box://`) QR mode toggle for Clash and Sing-box, and non-blocking click-to-toggle popover placement.
+
 ## [0.6.2] - 2026-11-25
 
 ### Fixed
