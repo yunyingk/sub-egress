@@ -119,6 +119,8 @@ class Source(Base):
     code = Column(String(8), default="", nullable=True)
     url = Column(Text, nullable=False)
     source_type = Column(String(32), default="auto")  # auto, remote_clash, remote_base64, local_yaml
+    tier = Column(String(32), default="standard", server_default="standard", nullable=False)  # standard / premium
+    share_scope = Column(String(16), default="all", server_default="all", nullable=False)  # all / selected
     enabled = Column(Boolean, default=True, nullable=False)
     status = Column(String(32), default="pending")  # healthy, error, updating
     error_message = Column(Text, nullable=True)
@@ -132,9 +134,24 @@ class Source(Base):
     updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     nodes = relationship("Node", back_populates="source", cascade="all, delete-orphan")
+    grants = relationship("SourceUserGrant", back_populates="source", cascade="all, delete-orphan")
     __table_args__ = (CheckConstraint("(is_shared AND owner_user_id IS NULL) OR (NOT is_shared AND owner_user_id IS NOT NULL)", name="ck_sources_owner_scope"),)
     owner = relationship("User", back_populates="sources", foreign_keys=[owner_user_id])
     creator = relationship("User", foreign_keys=[created_by_user_id])
+
+
+class SourceUserGrant(Base):
+    """Explicit user whitelist for restricted shared sources."""
+    __tablename__ = "source_user_grants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+
+    __table_args__ = (UniqueConstraint("source_id", "user_id", name="uq_source_user_grant"),)
+    source = relationship("Source", back_populates="grants")
+    user = relationship("User")
 
 
 class Node(Base):

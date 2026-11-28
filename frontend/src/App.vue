@@ -135,6 +135,7 @@
             @refresh-source="refreshSource"
             @delete-source="deleteSource"
             @toggle-shared-source="toggleSharedSource"
+            @toggle-source-tier="toggleSourceTier"
           />
         </div>
 
@@ -419,6 +420,23 @@ export default {
       }
     };
 
+    const toggleSourceTier = async (src) => {
+      const nextTier = src.tier === 'premium' ? 'standard' : 'premium';
+      try {
+        const res = await fetch(`/api/sources/${src.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ tier: nextTier })
+        });
+        if (res.ok) {
+          await Promise.all([fetchSources(), fetchNodes()]);
+        }
+      } catch (e) {
+        console.error('Failed to toggle source tier', e);
+      }
+    };
+
     const createSource = async (formData) => {
       creatingSource.value = true;
       try {
@@ -540,6 +558,7 @@ export default {
       refreshSource,
       deleteSource,
       toggleSharedSource,
+      toggleSourceTier,
       createSource,
       saveSettings,
       applySubscriptionToken,

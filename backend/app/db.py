@@ -108,6 +108,14 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE sources ADD COLUMN deleted_at {timestamp_type}"))  # noqa: S608
         if "deleted_by_user_id" not in source_columns:
             await conn.execute(text("ALTER TABLE sources ADD COLUMN deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+        if "tier" not in source_columns:
+            await conn.execute(text("ALTER TABLE sources ADD COLUMN tier VARCHAR(32) NOT NULL DEFAULT 'standard'"))
+            await conn.execute(text(
+                "UPDATE sources SET tier = 'premium' "
+                "WHERE EXISTS (SELECT 1 FROM nodes WHERE nodes.source_id = sources.id AND nodes.is_residential = TRUE)"
+            ))
+        if "share_scope" not in source_columns:
+            await conn.execute(text("ALTER TABLE sources ADD COLUMN share_scope VARCHAR(16) NOT NULL DEFAULT 'all'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sources_deleted_at ON sources (deleted_at)"))
 
     # 管理员初始化与忘记密码检查

@@ -49,6 +49,49 @@ DEFAULT_SNIFFER_CONFIG = {
     }
 }
 
+PREMIUM_GROUP_NAME = "精选高级"
+DYNAMIC_PREMIUM_GROUP_NAME = "[动态·精选高级] ⭐ 精选高级主备"
+DYNAMIC_GLOBAL_GROUP_NAME = "[动态·全局] 🌐 日常全网优选"
+
+DEFAULT_AI_PROXY_DOMAINS = (
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claudeusercontent.com",
+    "statsigapi.net",
+    "openai.com",
+    "chatgpt.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    "arkoselabs.com",
+    "statsig.com",
+    "featuregates.org",
+    "x.ai",
+    "grok.com",
+    "perplexity.ai",
+    "gemini.google.com",
+    "aistudio.google.com",
+    "ai.google.dev",
+    "generativelanguage.googleapis.com",
+    "makersuite.google.com",
+    "alkalimakersuite-pa.clients6.google.com",
+    "deepmind.com",
+    "deepmind.google",
+    "notebooklm.google.com",
+    "notebooklm.google",
+    "labs.google",
+    "cursor.sh",
+    "cursor.com",
+    "cursorapi.com",
+    "copilot.github.com",
+    "api.githubcopilot.com",
+    "windsurf.com",
+    "codeium.com",
+)
+DEFAULT_AI_EXACT_DOMAINS = ("challenges.cloudflare.com",)
+DEFAULT_AI_DOMAIN_KEYWORDS = ("arkose",)
+DEFAULT_AI_IP_CIDRS = ("160.79.104.0/21",)
+
 DEFAULT_GOOGLE_PROXY_DOMAINS = (
     "google.com",
     "googleapis.com",
@@ -59,7 +102,6 @@ DEFAULT_GOOGLE_PROXY_DOMAINS = (
     "withgoogle.com",
     "ggpht.com",
     "google",
-    "ai.google.dev",
     "g.co",
     "goo.gl",
 )
@@ -92,26 +134,12 @@ DEFAULT_RULES = [
     "DST-PORT,143,DIRECT",
     "DST-PORT,993,DIRECT",
     "DST-PORT,995,DIRECT",
-    # 6. 重点 AI 域名与风控服务精准走主选择器
-    "DOMAIN-SUFFIX,anthropic.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,claude.ai,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,claude.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,claudeusercontent.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,statsigapi.net,__MAIN_PROXY__",
-    "IP-CIDR,160.79.104.0/21,__MAIN_PROXY__,no-resolve",
-    "DOMAIN-SUFFIX,openai.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,chatgpt.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,oaistatic.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,oaiusercontent.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,arkoselabs.com,__MAIN_PROXY__",
-    "DOMAIN-KEYWORD,arkose,__MAIN_PROXY__",
-    "DOMAIN,challenges.cloudflare.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,statsig.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,featuregates.org,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,x.ai,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,grok.com,__MAIN_PROXY__",
-    "DOMAIN-SUFFIX,perplexity.ai,__MAIN_PROXY__",
-    # 7. Google 核心服务与终端地区校验域名 (置于 GEOSITE/GEOIP,CN 之前，防止解析到国内节点直连泄露)
+    # 6. 重点 AI 与高风控域名精准走精选高级组
+    *[f"DOMAIN-SUFFIX,{domain},__PREMIUM_PROXY__" for domain in DEFAULT_AI_PROXY_DOMAINS],
+    *[f"DOMAIN,{domain},__PREMIUM_PROXY__" for domain in DEFAULT_AI_EXACT_DOMAINS],
+    *[f"DOMAIN-KEYWORD,{kw},__PREMIUM_PROXY__" for kw in DEFAULT_AI_DOMAIN_KEYWORDS],
+    *[f"IP-CIDR,{cidr},__PREMIUM_PROXY__,no-resolve" for cidr in DEFAULT_AI_IP_CIDRS],
+    # 7. Google 常规服务走主出站 (置于 GEOSITE/GEOIP,CN 之前，防止解析到国内节点直连泄露)
     *[f"DOMAIN-SUFFIX,{domain},__MAIN_PROXY__" for domain in DEFAULT_GOOGLE_PROXY_DOMAINS],
     # 8. IP 与 DNS 泄露检测站点
     "DOMAIN-SUFFIX,browserleaks.com,__MAIN_PROXY__",
@@ -149,30 +177,49 @@ def sort_residential_nodes(names: list[str]) -> list[str]:
     return sorted(names, key=key_fn)
 
 
+def _is_premium_node(item: dict[str, Any]) -> bool:
+    tier = item.get("source_tier")
+    if tier is not None:
+        return tier == "premium"
+    return bool(item.get("is_residential"))
+
+
+def _dedupe_names(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in items:
+        if name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
 def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     根据接入的可用物理节点，自动计算带边界的聚合动态策略组 (URL-Test / Fallback)。
-    既用于下发配置文件生成，也用于提供给 Web 仪表盘清晰展示。
+    普通日常组与精选高级组严格隔离，既用于下发配置生成，也用于 Web 仪表盘展示。
     """
     if not raw_nodes:
         return []
 
-    pass_through_names = [item.get("display_name") or item.get("name") for item in raw_nodes if (item.get("display_name") or item.get("name"))]
     by_country: dict[str, list[str]] = {}
-    residential_names: list[str] = []
+    standard_names: list[str] = []
+    premium_names: list[str] = []
 
     for item in raw_nodes:
         name = item.get("display_name") or item.get("name")
         if not name:
             continue
-        cc = (item.get("country_code") or "OTHER").upper()
-        by_country.setdefault(cc, []).append(name)
-        if item.get("is_residential"):
-            residential_names.append(name)
+        if _is_premium_node(item):
+            premium_names.append(name)
+        else:
+            cc = (item.get("country_code") or "OTHER").upper()
+            by_country.setdefault(cc, []).append(name)
+            standard_names.append(name)
 
     groups = []
 
-    # 1. 重点地区同国巡检低延迟动态组 (绝不跨区乱跳)
+    # 1. 重点地区同国巡检低延迟动态组 (仅纳入普通日常节点，绝不混入精选高级)
     for code, flag, short_name, desc in DYNAMIC_REGIONS:
         node_names = by_country.get(code, [])
         if node_names:
@@ -182,6 +229,7 @@ def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, An
                 "strategy": "同国低延迟自动优选",
                 "country_code": code,
                 "country_flag": flag,
+                "is_premium": False,
                 "node_count": len(node_names),
                 "proxies": list(node_names),
                 "url": "http://www.gstatic.com/generate_204",
@@ -189,15 +237,16 @@ def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, An
                 "tolerance": 50
             })
 
-    # 2. 纯净美国家宽住宅智能主备组 (绝不混入机房IP)
-    if residential_names:
-        sorted_res = sort_residential_nodes(residential_names)
+    # 2. 精选高级主备组 (仅纳入显式标记为精选高级的节点)
+    if premium_names:
+        sorted_res = sort_residential_nodes(premium_names)
         groups.append({
-            "name": "[动态·家宽] 🇺🇸 美国住宅智能主备",
+            "name": DYNAMIC_PREMIUM_GROUP_NAME,
             "type": "fallback",
-            "strategy": "纯净住宅IP主备容灾",
-            "country_code": "US",
-            "country_flag": "🇺🇸",
+            "strategy": "精选高级节点主备容灾",
+            "country_code": "PREMIUM",
+            "country_flag": "⭐",
+            "is_premium": True,
             "node_count": len(sorted_res),
             "proxies": sorted_res,
             "url": "http://www.gstatic.com/generate_204",
@@ -205,16 +254,17 @@ def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, An
             "tolerance": 50
         })
 
-    # 3. 全网全局兜底容灾组
-    if pass_through_names:
+    # 3. 日常全网全局优选兜底组 (仅纳入普通日常节点)
+    if standard_names:
         groups.append({
-            "name": "[动态·全局] 🌐 全网故障转移",
+            "name": DYNAMIC_GLOBAL_GROUP_NAME,
             "type": "url-test",
-            "strategy": "全网跨区故障转移兜底",
+            "strategy": "日常普通节点全网低延迟优选",
             "country_code": "ALL",
             "country_flag": "🌐",
-            "node_count": len(pass_through_names),
-            "proxies": list(pass_through_names),
+            "is_premium": False,
+            "node_count": len(standard_names),
+            "proxies": list(standard_names),
             "url": "http://www.gstatic.com/generate_204",
             "interval": 300,
             "tolerance": 100
@@ -225,40 +275,36 @@ def extract_dynamic_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, An
 
 def extract_source_groups(raw_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    按供应商（根据节点前缀 [XX]）聚合生成供应商专属策略组。
+    按供应商前缀 [XX] 与节点等级聚合生成供应商专属策略组。
     """
-    import re
-    by_source: dict[str, list[str]] = {}
+    by_source: dict[tuple[str, bool], list[str]] = {}
     for item in raw_nodes:
         name = item.get("display_name") or item.get("name")
         if not name:
             continue
         m = re.match(r'^\[([A-Za-z0-9]+)\]', name)
         code = m.group(1).upper() if m else "OTHER"
-        by_source.setdefault(code, []).append(name)
+        by_source.setdefault((code, _is_premium_node(item)), []).append(name)
 
     source_groups = []
-    for code, n_names in by_source.items():
+    for (code, is_prem), n_names in by_source.items():
         if not n_names:
             continue
-        if code == "RE":
-            s_name = "[源·RE] 🇺🇸 RESIP 美国家宽专区"
+        if is_prem:
+            s_name = f"[源·{code}] ⭐ {code} 精选高级专区"
             s_type = "fallback"
-            s_flag = "🇺🇸"
+            s_flag = "⭐"
             n_names = sort_residential_nodes(n_names)
-        elif code == "SD":
-            s_name = "[源·SD] 🌐 SDK 机场全节点专区"
-            s_type = "url-test"
-            s_flag = "🌐"
         else:
             s_name = f"[源·{code}] 🌐 供应商 {code} 专区"
             s_type = "url-test"
             s_flag = "🌐"
-        
+
         source_groups.append({
             "name": s_name,
             "type": s_type,
             "country_flag": s_flag,
+            "is_premium": is_prem,
             "proxies": n_names,
             "url": "http://www.gstatic.com/generate_204",
             "interval": 300,
@@ -274,14 +320,15 @@ def build_clash_config(
     custom_direct_domains: list[str] = None,
     custom_proxy_domains: list[str] = None,
     custom_rules: list[str] = None,
-    custom_nameserver_policy: dict[str, Any] = None
+    custom_nameserver_policy: dict[str, Any] = None,
+    custom_premium_domains: list[str] = None,
 ) -> str:
     """
     Builds a clean, production-grade Mihomo / ClashMeta YAML configuration with:
-    - Primary mixed port (default 7897) for general traffic & TUN bound to [{mixed_port}] 主出站
-    - Secondary listeners mixed port (default 7898) directly bound to [{terminal_port}] 副出站 (px-7898)
-    - Full four-layer pyramid hierarchy (Dual Ports -> Source Groups -> Dynamic Regions -> Physical Nodes)
-    - 100% decoupled from personal/corporate domains with dynamic rule injection.
+    - Primary mixed port (default 7897) for general traffic & TUN bound to [{mixed_port}] 主出站 (standard nodes)
+    - Dedicated 精选高级 selector for AI & high-risk domains (premium nodes)
+    - Secondary listeners mixed port (default 7898) directly bound to [{terminal_port}] 副出站 (standard nodes)
+    - Explicit GLOBAL selector defaulting to [{mixed_port}] 主出站 to avoid accidental premium burn in global mode
     """
     main_group_name = f"[{mixed_port}] 主出站"
     terminal_group_name = f"[{terminal_port}] 副出站"
@@ -296,14 +343,17 @@ def build_clash_config(
             "proxies": [dummy_node],
             "proxy-groups": [
                 {"name": main_group_name, "type": "select", "proxies": ["DIRECT"]},
-                {"name": terminal_group_name, "type": "select", "proxies": ["DIRECT"]}
+                {"name": PREMIUM_GROUP_NAME, "type": "select", "proxies": [main_group_name, "DIRECT"]},
+                {"name": terminal_group_name, "type": "select", "proxies": ["DIRECT"]},
+                {"name": "GLOBAL", "type": "select", "proxies": [main_group_name, PREMIUM_GROUP_NAME, terminal_group_name, "DIRECT"]},
             ],
             "rules": [f"MATCH,{main_group_name}"]
         }
         return yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
 
     proxies_list: list[dict[str, Any]] = []
-    pass_through_names: list[str] = []
+    standard_names: list[str] = []
+    premium_names: list[str] = []
 
     for item in raw_nodes:
         if "config_json" in item and isinstance(item["config_json"], dict):
@@ -311,7 +361,7 @@ def build_clash_config(
         else:
             node_cfg = copy.deepcopy(item)
             # Remove helper metadata keys if any
-            for k in ["display_name", "country_code", "country_flag", "is_residential"]:
+            for k in ["display_name", "country_code", "country_flag", "is_residential", "source_name", "source_tier"]:
                 node_cfg.pop(k, None)
 
         display_name = item.get("display_name") or item.get("name")
@@ -319,15 +369,20 @@ def build_clash_config(
             continue
         node_cfg["name"] = display_name
         proxies_list.append(node_cfg)
-        pass_through_names.append(display_name)
+        if _is_premium_node(item):
+            premium_names.append(display_name)
+        else:
+            standard_names.append(display_name)
 
-    # 1. 地区低延迟智能动态组
+    # 1. 地区低延迟智能动态组与精选高级主备组
     dyn_groups = extract_dynamic_groups(raw_nodes)
-    dyn_names = [g["name"] for g in dyn_groups]
+    standard_dyn_names = [g["name"] for g in dyn_groups if not g.get("is_premium")]
+    premium_dyn_names = [g["name"] for g in dyn_groups if g.get("is_premium")]
 
     # 2. 供应商专区组
     src_groups = extract_source_groups(raw_nodes)
-    src_names = [g["name"] for g in src_groups]
+    standard_src_names = [g["name"] for g in src_groups if not g.get("is_premium")]
+    premium_src_names = [g["name"] for g in src_groups if g.get("is_premium")]
 
     # 格式化所有辅助策略组
     sub_groups = []
@@ -343,17 +398,23 @@ def build_clash_config(
             grp["tolerance"] = g["tolerance"]
         sub_groups.append(grp)
 
-    # 默认预选探测：主出站默认优先家宽；副出站默认优先日区
-    res_group_name = next((g["name"] for g in dyn_groups if "家宽" in g["name"]), None)
-    jp_group_name = next((g["name"] for g in dyn_groups if g.get("country_code") == "JP"), None)
+    jp_group_name = next((g["name"] for g in dyn_groups if not g.get("is_premium") and g.get("country_code") == "JP"), None)
 
-    # 构建主出站候选列表（美国家宽智能主备置顶）
-    main_proxies = []
-    if res_group_name:
-        main_proxies.append(res_group_name)
-    for name in [*src_names, *dyn_names, *pass_through_names]:
-        if name not in main_proxies:
-            main_proxies.append(name)
+    # 构建主出站候选列表（仅普通节点；极端情况全为高级节点时才兜底）
+    if standard_names:
+        main_proxies = _dedupe_names([
+            *([DYNAMIC_GLOBAL_GROUP_NAME] if DYNAMIC_GLOBAL_GROUP_NAME in standard_dyn_names else []),
+            *standard_src_names,
+            *standard_dyn_names,
+            *standard_names,
+        ])
+    else:
+        main_proxies = _dedupe_names([
+            *([DYNAMIC_PREMIUM_GROUP_NAME] if DYNAMIC_PREMIUM_GROUP_NAME in premium_dyn_names else []),
+            *premium_src_names,
+            *premium_dyn_names,
+            *premium_names,
+        ])
 
     main_selector = {
         "name": main_group_name,
@@ -361,13 +422,42 @@ def build_clash_config(
         "proxies": main_proxies or ["DIRECT"]
     }
 
-    # 构建副出站候选列表（日本最佳低延迟置顶）
-    terminal_proxies = []
-    if jp_group_name:
-        terminal_proxies.append(jp_group_name)
-    for name in [*src_names, *dyn_names, *pass_through_names]:
-        if name not in terminal_proxies:
-            terminal_proxies.append(name)
+    # 构建精选高级出站（有高级节点则默认选中高级主备，末尾附主出站用于手动应急；无高级节点则指向主出站）
+    if premium_names:
+        premium_proxies = _dedupe_names([
+            *premium_dyn_names,
+            *premium_src_names,
+            *premium_names,
+            main_group_name,
+        ])
+    else:
+        premium_proxies = _dedupe_names([
+            main_group_name,
+            *standard_dyn_names,
+            *standard_src_names,
+            *standard_names,
+        ])
+
+    premium_selector = {
+        "name": PREMIUM_GROUP_NAME,
+        "type": "select",
+        "proxies": premium_proxies or ["DIRECT"]
+    }
+
+    # 构建副出站候选列表（单一出口，日本普通低延迟置顶，严格排除高级节点）
+    if standard_names:
+        terminal_proxies = _dedupe_names([
+            *([jp_group_name] if jp_group_name else []),
+            *standard_src_names,
+            *standard_dyn_names,
+            *standard_names,
+        ])
+    else:
+        terminal_proxies = _dedupe_names([
+            *premium_src_names,
+            *premium_dyn_names,
+            *premium_names,
+        ])
 
     terminal_selector = {
         "name": terminal_group_name,
@@ -375,7 +465,21 @@ def build_clash_config(
         "proxies": terminal_proxies or ["DIRECT"]
     }
 
-    full_groups = [main_selector, terminal_selector, *sub_groups]
+    # 显式 GLOBAL 组：全局模式默认落到主出站（便宜节点），避免误烧高级流量
+    global_selector = {
+        "name": "GLOBAL",
+        "type": "select",
+        "proxies": _dedupe_names([
+            main_group_name,
+            PREMIUM_GROUP_NAME,
+            terminal_group_name,
+            *standard_dyn_names,
+            *standard_src_names,
+            "DIRECT",
+        ])
+    }
+
+    full_groups = [main_selector, premium_selector, terminal_selector, global_selector, *sub_groups]
 
     # 构造双端口监听器
     listeners = [
@@ -400,6 +504,14 @@ def build_clash_config(
     if custom_nameserver_policy:
         dns_cfg["nameserver-policy"].update(custom_nameserver_policy)
 
+    def _expand_rule_targets(rule_text: str) -> str:
+        return (
+            rule_text
+            .replace("__MAIN_PROXY__", main_group_name)
+            .replace("__PREMIUM_PROXY__", PREMIUM_GROUP_NAME)
+            .replace("__AI_PROXY__", PREMIUM_GROUP_NAME)
+        )
+
     # 动态组装 Rules
     rules = []
     # 1. 用户级/全局直连域名规则 (优先级最高，置顶免代理且免 fake-ip 劫持)
@@ -409,22 +521,29 @@ def build_clash_config(
             if dom:
                 rules.append(f"DOMAIN-SUFFIX,{dom},DIRECT")
 
-    # 2. 用户级/全局强制走主代理域名规则
+    # 2. 用户级/全局强制走主代理域名规则（可覆盖内置规则回退至便宜节点）
     if custom_proxy_domains:
         for dom in custom_proxy_domains:
             dom = dom.strip()
             if dom:
                 rules.append(f"DOMAIN-SUFFIX,{dom},{main_group_name}")
 
-    # 3. 用户级自定义分流规则注入
+    # 3. 管理员/全局精选高级域名规则
+    if custom_premium_domains:
+        for dom in custom_premium_domains:
+            dom = dom.strip()
+            if dom:
+                rules.append(f"DOMAIN-SUFFIX,{dom},{PREMIUM_GROUP_NAME}")
+
+    # 4. 用户级/管理员自定义分流规则注入
     if custom_rules:
         for r in custom_rules:
             r = r.strip()
             if r and not r.startswith("#"):
-                rules.append(r.replace("__MAIN_PROXY__", main_group_name))
+                rules.append(_expand_rule_targets(r))
 
     for r in DEFAULT_RULES:
-        rules.append(r.replace("__MAIN_PROXY__", main_group_name))
+        rules.append(_expand_rule_targets(r))
 
     config = {
         "mixed-port": mixed_port,
@@ -452,12 +571,14 @@ def build_singbox_config(
     custom_direct_domains: list[str] = None,
     custom_proxy_domains: list[str] = None,
     custom_rules: list[str] = None,
+    custom_premium_domains: list[str] = None,
 ) -> str:
     """
-    Builds a complete, modern Sing-box JSON configuration with single-selector control.
+    Builds a complete, modern Sing-box JSON configuration with PROXY & PREMIUM separation.
     """
     outbounds: list[dict[str, Any]] = []
-    pass_through_tags: list[str] = []
+    standard_tags: list[str] = []
+    premium_tags: list[str] = []
     supported_nodes: list[dict[str, Any]] = []
 
     for item in raw_nodes:
@@ -552,16 +673,23 @@ def build_singbox_config(
 
         if outbound:
             outbounds.append(outbound)
-            pass_through_tags.append(tag)
             supported_nodes.append(item)
+            if _is_premium_node(item):
+                premium_tags.append(tag)
+            else:
+                standard_tags.append(tag)
 
     # 动态组 (使用统一的 extract_dynamic_groups)
     dyn_groups = extract_dynamic_groups(supported_nodes)
     group_outbounds: list[dict[str, Any]] = []
-    dyn_tags: list[str] = []
+    standard_dyn_tags: list[str] = []
+    premium_dyn_tags: list[str] = []
 
     for g in dyn_groups:
-        dyn_tags.append(g["name"])
+        if g.get("is_premium"):
+            premium_dyn_tags.append(g["name"])
+        else:
+            standard_dyn_tags.append(g["name"])
         group_outbounds.append({
             "type": "urltest",
             "tag": g["name"],
@@ -570,17 +698,41 @@ def build_singbox_config(
             "interval": "5m"
         })
 
-    # 主选择器 PROXY
+    # 主选择器 PROXY（严格仅含普通日常节点；无普通节点时才兜底高级节点）
+    if standard_tags:
+        proxy_candidates = _dedupe_names([
+            *([DYNAMIC_GLOBAL_GROUP_NAME] if DYNAMIC_GLOBAL_GROUP_NAME in standard_dyn_tags else []),
+            *standard_dyn_tags,
+            *standard_tags,
+        ])
+    elif premium_tags:
+        proxy_candidates = _dedupe_names([*premium_dyn_tags, *premium_tags])
+    else:
+        proxy_candidates = ["direct"]
+
     proxy_selector = {
         "type": "selector",
         "tag": "PROXY",
-        "outbounds": [*dyn_tags, *pass_through_tags] if pass_through_tags else ["direct"],
-        "default": dyn_tags[0] if dyn_tags else (pass_through_tags[0] if pass_through_tags else "direct")
+        "outbounds": proxy_candidates,
+        "default": proxy_candidates[0]
+    }
+
+    # 精选高级选择器 PREMIUM（对齐 Clash 的 精选高级）
+    if premium_tags:
+        premium_candidates = _dedupe_names([*premium_dyn_tags, *premium_tags, "PROXY"])
+    else:
+        premium_candidates = ["PROXY"]
+
+    premium_selector = {
+        "type": "selector",
+        "tag": "PREMIUM",
+        "outbounds": premium_candidates,
+        "default": premium_candidates[0]
     }
 
     # 基础出站
     system_outbounds = [{"type": "direct", "tag": "direct"}]
-    all_outbounds = [proxy_selector, *group_outbounds, *outbounds, *system_outbounds]
+    all_outbounds = [proxy_selector, premium_selector, *group_outbounds, *outbounds, *system_outbounds]
 
     rule_sets: dict[str, dict[str, str]] = {}
 
@@ -608,7 +760,20 @@ def build_singbox_config(
         domains = [domain.strip() for domain in custom_proxy_domains if domain.strip()]
         if domains:
             route_rules.append({"domain_suffix": domains, "outbound": "PROXY"})
+    if custom_premium_domains:
+        domains = [domain.strip() for domain in custom_premium_domains if domain.strip()]
+        if domains:
+            route_rules.append({"domain_suffix": domains, "outbound": "PREMIUM"})
     type_map = {"DOMAIN": "domain", "DOMAIN-SUFFIX": "domain_suffix", "DOMAIN-KEYWORD": "domain_keyword", "IP-CIDR": "ip_cidr", "IP-CIDR6": "ip_cidr", "GEOIP": "rule_set", "GEOSITE": "rule_set"}
+    target_map = {
+        "DIRECT": "direct",
+        "PROXY": "PROXY",
+        "__MAIN_PROXY__": "PROXY",
+        "PREMIUM": "PREMIUM",
+        "__PREMIUM_PROXY__": "PREMIUM",
+        "__AI_PROXY__": "PREMIUM",
+        PREMIUM_GROUP_NAME: "PREMIUM",
+    }
     for raw_rule in custom_rules or []:
         parts = [part.strip() for part in raw_rule.split(",")]
         if len(parts) < 3 or parts[0].upper() not in type_map:
@@ -628,10 +793,16 @@ def build_singbox_config(
         if target_key == "REJECT":
             match["action"] = "reject"
         else:
-            match["outbound"] = {"DIRECT": "direct", "PROXY": "PROXY", "__MAIN_PROXY__": "PROXY"}.get(target_key, target)
+            match["outbound"] = target_map.get(target_key, target_map.get(target, target))
         route_rules.append(match)
 
-    route_rules.append({"domain_suffix": list(DEFAULT_GOOGLE_PROXY_DOMAINS), "outbound": "PROXY"})
+    route_rules.extend([
+        {"domain_suffix": list(DEFAULT_AI_PROXY_DOMAINS), "outbound": "PREMIUM"},
+        {"domain": list(DEFAULT_AI_EXACT_DOMAINS), "outbound": "PREMIUM"},
+        {"domain_keyword": list(DEFAULT_AI_DOMAIN_KEYWORDS), "outbound": "PREMIUM"},
+        {"ip_cidr": list(DEFAULT_AI_IP_CIDRS), "outbound": "PREMIUM"},
+        {"domain_suffix": list(DEFAULT_GOOGLE_PROXY_DOMAINS), "outbound": "PROXY"},
+    ])
 
     geoip_cn = add_rule_set("geoip", "cn")
     geosite_cn = add_rule_set("geosite", "cn")

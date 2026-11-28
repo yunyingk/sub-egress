@@ -52,6 +52,15 @@
             <input v-model="form.name" type="text" placeholder="例如: 机场A / 自建专线" 
                    class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
           </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">节点源等级</label>
+            <select v-model="form.tier"
+                    class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500">
+              <option value="standard">普通日常 (走主/副出站与地区优选)</option>
+              <option value="premium">精选高级 (仅走「精选高级」组，不混入日常流量)</option>
+            </select>
+          </div>
         </div>
 
         <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
@@ -80,7 +89,7 @@ export default {
   },
   emits: ['close', 'create'],
   setup(props, { emit }) {
-    const form = ref({ name: '', url: '' });
+    const form = ref({ name: '', url: '', tier: 'standard' });
     const isProbing = ref(false);
     const probeInfo = ref(null);
     let probeTimer = null;
@@ -131,8 +140,8 @@ export default {
 
     const handleCreate = () => {
       if (!form.value.name.trim() || !form.value.url.trim()) return;
-      emit('create', { name: form.value.name.trim(), url: form.value.url.trim() });
-      form.value = { name: '', url: '' };
+      emit('create', { name: form.value.name.trim(), url: form.value.url.trim(), tier: form.value.tier || 'standard' });
+      form.value = { name: '', url: '', tier: 'standard' };
       probeInfo.value = null;
       autoFilledName = '';
     };

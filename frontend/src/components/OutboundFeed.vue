@@ -183,8 +183,8 @@
             <i class="fa-solid fa-circle-check text-emerald-500"></i> 极简二元制单一节点选择原则：
           </div>
           <ul class="space-y-1.5 pl-4 list-disc text-slate-500 dark:text-slate-400">
-            <li><strong class="text-slate-700 dark:text-slate-300">双门双出站</strong>：主门 [7897] 主出站（TUN/全局，默认美国家宽），副门 [7898] 副出站（终端高速，默认日区低延迟）。</li>
-            <li><strong class="text-slate-700 dark:text-slate-300">供应商专区</strong>：按 [RE] 住宅专区、[SD] 机场专区整组调用，随时全局切换供应商。</li>
+            <li><strong class="text-slate-700 dark:text-slate-300">多组精准分流</strong>：主门 [7897] 主出站（日常外网默认便宜节点）、精选高级（AI/风控规则直达网页标记高级源）、副门 [7898] 副出站（终端纯普通单一出口），GLOBAL 默认锁定主出站防误烧。</li>
+            <li><strong class="text-slate-700 dark:text-slate-300">供应商专区</strong>：按供应商前缀聚合专区，普通日常与精选高级彻底隔离。</li>
             <li><strong class="text-slate-700 dark:text-slate-300">地区智能组</strong>：港区、日区、台区、狮城等同国同区自动测速优选，绝不跨区乱跳。</li>
             <li><strong class="text-slate-700 dark:text-slate-300">物理节点池</strong>：精简命名，单机直点，由客户端自由固定指定。</li>
           </ul>

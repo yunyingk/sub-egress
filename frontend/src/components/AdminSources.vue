@@ -85,6 +85,18 @@
                   <i class="fa-solid" :class="src.is_shared ? 'fa-globe' : 'fa-user-lock'"></i>
                   {{ src.is_shared ? '平台公共共享' : `租户私有 [${src.owner_username}]` }}
                 </span>
+                <span :class="src.tier === 'premium' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-300 dark:border-amber-800' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-600'"
+                      class="px-2 py-0.5 text-xs font-semibold rounded-md border flex items-center gap-1">
+                  <i class="fa-solid" :class="src.tier === 'premium' ? 'fa-star text-[10px]' : 'fa-layer-group text-[10px]'"></i>
+                  {{ src.tier === 'premium' ? '精选高级' : '普通日常' }}
+                </span>
+                <span v-if="src.is_shared"
+                      :class="src.share_scope === 'selected' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'"
+                      class="px-2 py-0.5 text-xs font-medium rounded-md border flex items-center gap-1"
+                      :title="src.share_scope === 'selected' && src.granted_usernames?.length ? '白名单: ' + src.granted_usernames.join(', ') : ''">
+                  <i class="fa-solid" :class="src.share_scope === 'selected' ? 'fa-user-check text-[10px]' : 'fa-users text-[10px]'"></i>
+                  {{ src.share_scope === 'selected' ? `白名单 · ${(src.granted_user_ids || []).length} 人` : '全员可见' }}
+                </span>
                 <span :class="src.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800'"
                       class="px-2 py-0.5 text-xs rounded border font-mono">
                   {{ src.status === 'healthy' ? '正常' : '异常' }}
@@ -97,7 +109,12 @@
                 </span>
               </div>
 
-              <div class="text-xs text-slate-500 dark:text-slate-400">创建人：{{ src.creator_username || '未知' }}</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">
+                创建人：{{ src.creator_username || '未知' }}
+                <span v-if="src.is_shared && src.share_scope === 'selected'" class="ml-2 text-indigo-600 dark:text-indigo-400">
+                  · 授权用户：{{ (src.granted_usernames && src.granted_usernames.length) ? src.granted_usernames.join('、') : '暂未勾选任何人' }}
+                </span>
+              </div>
               <div class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate" :title="src.url">
                 {{ maskUrl(src.url) }}
               </div>
@@ -222,10 +239,53 @@
             </div>
           </div>
 
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">节点源等级</label>
+              <select v-model="form.tier"
+                      class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option value="standard">普通日常 (主/副出站与地区优选)</option>
+                <option value="premium">精选高级 (仅进「精选高级」组)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">可见范围</label>
+              <select v-model="form.share_scope"
+                      class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option value="all">全平台所有用户</option>
+                <option value="selected">仅指定白名单用户</option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="form.share_scope === 'selected'" class="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/50 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-indigo-900 dark:text-indigo-200">勾选允许访问此源的用户</span>
+              <span class="text-[11px] text-indigo-600 dark:text-indigo-400">已选 {{ form.granted_user_ids.length }} 人</span>
+            </div>
+            <div v-if="users.length === 0" class="text-[11px] text-slate-500">暂无可选用户</div>
+            <div v-else class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-32 overflow-y-auto pt-1">
+              <label v-for="u in users" :key="u.id"
+                     class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-indigo-400">
+                <input type="checkbox" :value="u.id" v-model="form.granted_user_ids" class="rounded text-indigo-600">
+                <span class="truncate text-slate-800 dark:text-slate-200 font-medium">{{ u.username }}</span>
+                <span v-if="u.role === 'admin'" class="text-[10px] text-purple-600 dark:text-purple-400">管理</span>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="form.source_type === 'local_yaml'">
+            <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">本地 Clash YAML / 节点内容</label>
+            <textarea v-model="form.raw_content" rows="5"
+                      placeholder="粘贴 Clash proxies YAML 或节点 URI 列表..."
+                      class="w-full px-3 py-2 font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
+          </div>
+
           <!-- 平台共享属性说明 (不再提供转公/转私选择，严格遵循共享专区职责) -->
           <div class="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/40 text-[11px] text-purple-800 dark:text-purple-300 flex items-start gap-2">
             <i class="fa-solid fa-globe text-purple-600 dark:text-purple-400 mt-0.5 shrink-0"></i>
-            <span>此数据源为<strong>全平台公共基础设施</strong>（is_shared = true），保存后将自动广播下发至所有合法租户的客户端订阅与出站大盘中。</span>
+            <span>标为<strong>精选高级</strong>的源绝不会混入普通主/副出站；设为<strong>仅指定白名单</strong>后，未勾选的用户在列表、节点池与订阅中完全不可见。</span>
           </div>
         </div>
 
@@ -233,7 +293,7 @@
           <button @click="showModal = false" class="px-4 py-2 text-xs font-medium rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer">
             取消
           </button>
-          <button @click="handleSave" :disabled="saving || !form.name.trim() || !form.url.trim()" 
+          <button @click="handleSave" :disabled="saving || !form.name.trim() || (form.source_type === 'local_yaml' ? !form.raw_content.trim() : !form.url.trim())" 
                   class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
             <i class="fa-solid fa-check" :class="{'fa-spin': saving}"></i>
             <span>{{ saving ? '正在同步落库...' : '确认保存' }}</span>
@@ -253,8 +313,9 @@ export default {
   props: {
     currentAdmin: { type: Object, required: true }
   },
-  setup() {
+  setup(props) {
     const sources = ref([]);
+    const users = ref([]);
     const loading = ref(false);
     const saving = ref(false);
     const scope = ref('shared');
@@ -274,6 +335,10 @@ export default {
       name: '',
       url: '',
       source_type: 'auto',
+      tier: 'standard',
+      share_scope: 'all',
+      granted_user_ids: [],
+      raw_content: '',
       enabled: true,
       is_shared: true
     });
@@ -330,6 +395,17 @@ export default {
       }
     };
 
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch('/api/admin/users');
+        if (res.ok) {
+          users.value = await res.json();
+        }
+      } catch (e) {
+        console.debug('Failed to fetch users', e);
+      }
+    };
+
     const fetchSources = async () => {
       loading.value = true;
       try {
@@ -352,6 +428,12 @@ export default {
       fetchSources();
     };
 
+    watch(() => form.value.share_scope, (newScope) => {
+      if (newScope === 'selected' && (!form.value.granted_user_ids || form.value.granted_user_ids.length === 0) && props.currentAdmin?.id) {
+        form.value.granted_user_ids = [props.currentAdmin.id];
+      }
+    });
+
     const openAddModal = () => {
       isEditing.value = false;
       editingId.value = null;
@@ -361,6 +443,10 @@ export default {
         name: '',
         url: '',
         source_type: 'auto',
+        tier: 'standard',
+        share_scope: 'all',
+        granted_user_ids: [],
+        raw_content: '',
         enabled: true,
         is_shared: true
       };
@@ -378,6 +464,10 @@ export default {
         name: src.name,
         url: src.url,
         source_type: src.source_type || 'auto',
+        tier: src.tier || 'standard',
+        share_scope: src.share_scope || 'all',
+        granted_user_ids: [...(src.granted_user_ids || [])],
+        raw_content: src.raw_content || '',
         enabled: src.enabled !== false,
         is_shared: true
       };
@@ -385,7 +475,13 @@ export default {
     };
 
     const handleSave = async () => {
-      if (!form.value.name.trim() || !form.value.url.trim()) return;
+      const payload = { ...form.value };
+      if (payload.source_type === 'local_yaml' && !payload.url.trim()) {
+        payload.url = 'local://yaml';
+      }
+      if (!payload.name.trim()) return;
+      if (payload.source_type === 'local_yaml' && !payload.raw_content.trim()) return;
+      if (payload.source_type !== 'local_yaml' && !payload.url.trim()) return;
       saving.value = true;
       try {
         const url = isEditing.value ? `/api/admin/sources/${editingId.value}` : '/api/admin/sources';
@@ -393,7 +489,7 @@ export default {
         const res = await fetch(url, {
           method,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form.value)
+          body: JSON.stringify(payload)
         });
         if (res.ok) {
           setNotice(isEditing.value ? '共享源已成功更新！' : '平台共享源已成功创建并完成首次同步！');
@@ -449,10 +545,12 @@ export default {
 
     onMounted(() => {
       fetchSources();
+      fetchUsers();
     });
 
     return {
       sources,
+      users,
       loading,
       saving,
       scope,

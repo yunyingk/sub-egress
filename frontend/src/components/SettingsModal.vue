@@ -85,10 +85,10 @@
                 原生 Clash 自定义分流规则注入 (Custom Rules Inject)
               </label>
               <p class="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
-                直接注入到订阅配置的规则流中（支持 DOMAIN-KEYWORD, IP-CIDR 等），支持注释。
+                直接注入到订阅配置的规则流中（支持 <code>__MAIN_PROXY__</code> 主出站与 <code>__PREMIUM_PROXY__</code> 精选高级占位符），支持注释。
               </p>
               <textarea v-model="editSettings.custom_rules" rows="3" 
-                        placeholder="例如:&#10;DOMAIN-KEYWORD,google,PROXY&#10;IP-CIDR,192.168.100.0/24,DIRECT"
+                        placeholder="例如:&#10;DOMAIN-KEYWORD,google,__MAIN_PROXY__&#10;DOMAIN-SUFFIX,openai.com,__PREMIUM_PROXY__&#10;IP-CIDR,192.168.100.0/24,DIRECT"
                         class="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500"></textarea>
             </div>
           </div>

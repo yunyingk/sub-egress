@@ -3,6 +3,7 @@ import json
 import yaml
 from app.builder import (
     DEFAULT_GOOGLE_PROXY_DOMAINS,
+    PREMIUM_GROUP_NAME,
     build_clash_config,
     build_singbox_config,
 )
@@ -47,9 +48,16 @@ def test_clash_default_google_rules_order_and_port_binding():
         idx = rules.index(rule)
         assert direct_idx < ads_idx < quic_idx < stun_idx < idx < geosite_cn_idx < geoip_cn_idx
 
-    # Spot-check key domains needed for Chrome / Gemini region consistency
-    for required in ("google.com", "googleapis.com", "gstatic.com", "google", "ai.google.dev"):
+    # Spot-check regular Google domains stay on main_group, while AI domains go to 精选高级
+    for required in ("google.com", "googleapis.com", "gstatic.com", "google"):
         assert f"DOMAIN-SUFFIX,{required},{main_group}" in rules
+    for ai_domain in ("ai.google.dev", "gemini.google.com", "openai.com", "anthropic.com"):
+        ai_rule = f"DOMAIN-SUFFIX,{ai_domain},{PREMIUM_GROUP_NAME}"
+        assert ai_rule in rules
+        assert direct_idx < rules.index(ai_rule) < geosite_cn_idx
+
+    global_group = next(g for g in config["proxy-groups"] if g["name"] == "GLOBAL")
+    assert global_group["proxies"][0] == main_group
 
 
 def test_singbox_default_google_rules_precede_cn_direct_without_remote_google_ruleset():
@@ -63,6 +71,12 @@ def test_singbox_default_google_rules_precede_cn_direct_without_remote_google_ru
 
     direct_idx = rules.index({"domain_suffix": ["corp.example.test"], "outbound": "direct"})
     custom_idx = rules.index({"domain_suffix": ["custom.example.test"], "outbound": "PROXY"})
+    ai_idx = next(
+        i
+        for i, rule in enumerate(rules)
+        if rule.get("outbound") == "PREMIUM"
+        and "ai.google.dev" in rule.get("domain_suffix", [])
+    )
     google_idx = next(
         i
         for i, rule in enumerate(rules)
@@ -72,7 +86,7 @@ def test_singbox_default_google_rules_precede_cn_direct_without_remote_google_ru
     geoip_cn_idx = rules.index({"rule_set": ["geoip-cn"], "outbound": "direct"})
     geosite_cn_idx = rules.index({"rule_set": ["geosite-cn"], "outbound": "direct"})
 
-    assert direct_idx < custom_idx < google_idx < geoip_cn_idx < geosite_cn_idx
+    assert direct_idx < custom_idx < ai_idx < google_idx < geoip_cn_idx < geosite_cn_idx
 
     ruleset_tags = {item["tag"] for item in config["route"]["rule_set"]}
     assert "geosite-google" not in ruleset_tags

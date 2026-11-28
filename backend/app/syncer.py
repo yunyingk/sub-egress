@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import AsyncSessionLocal
 from .models import Node, Source
-from .parsers.clash import detect_country, is_residential_node, parse_clash_yaml
+from .parsers.clash import detect_country, parse_clash_yaml
 from .parsers.singbox import parse_singbox_json
 from .parsers.uri import parse_subscription_text
 
@@ -62,20 +62,9 @@ def strip_all_flags(text: str) -> str:
 
 def format_clean_node_name(source_code: str, orig_name: str, flag: str, is_res: bool, idx: int, protocol_type: str) -> str:
     base = strip_all_flags(orig_name).strip()
-    p_char = protocol_type[0].upper() if protocol_type else "S"
-    
-    # 针对美国家庭宽带节点的规范化
-    if is_res:
-        if "主线" in base:
-            return f"[{source_code}] {flag} 美国-01 {p_char} 住宅主线"
-        elif "备用" in base:
-            return f"[{source_code}] {flag} 美国-02 {p_char} 住宅备用"
-        else:
-            return f"[{source_code}] {flag} 美国-{idx:02d} {p_char} 住宅节点"
-            
-    # 针对普通机场节点，去除多余空白和前导符号
+    # 去除多余前导分隔符，统一按源前缀与国家旗帜命名，不再猜测住宅名称
     base = re.sub(r'^\s*[-_·]\s*', '', base)
-    return f"[{source_code}] {flag} {base}"
+    return f"[{source_code}] {flag} {base or f'节点-{idx:02d}'}"
 
 async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
     stmt = select(Source).where(Source.id == source_id, Source.deleted_at.is_(None)).with_for_update()
@@ -140,16 +129,16 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
 
         source_code = getattr(source, "code", None) or extract_source_code(source.name)
         source.code = source_code
+        is_premium = getattr(source, "tier", "standard") == "premium"
 
         for idx, item in enumerate(raw_nodes, 1):
             orig_name = str(item.get("name", "")).strip()
             flag, code = detect_country(orig_name)
-            is_res = is_residential_node(orig_name, item)
             ntype = str(item.get("type", "unknown"))
             server = str(item.get("server", ""))
             port = int(item.get("port", 0))
 
-            display_name = format_clean_node_name(source_code, orig_name, flag, is_res, idx, ntype)
+            display_name = format_clean_node_name(source_code, orig_name, flag, is_premium, idx, ntype)
 
             # 优先精确匹配 (server, port, ntype, orig_name)，其次匹配 (server, port, ntype)
             matched_node = None
@@ -168,7 +157,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
                 matched_node.display_name = display_name
                 matched_node.country_code = code
                 matched_node.country_flag = flag
-                matched_node.is_residential = is_res
+                matched_node.is_residential = is_premium
                 matched_node.config_json = item
             else:
                 node_rec = Node(
@@ -180,7 +169,7 @@ async def sync_single_source(source_id: int, session: AsyncSession) -> bool:
                     port=port,
                     country_code=code,
                     country_flag=flag,
-                    is_residential=is_res,
+                    is_residential=is_premium,
                     config_json=item
                 )
                 session.add(node_rec)

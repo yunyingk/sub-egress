@@ -25,6 +25,7 @@
           @refresh="$emit('refreshSource', $event)"
           @delete="$emit('deleteSource', $event)"
           @toggle-shared="$emit('toggleSharedSource', $event)"
+          @toggle-tier="$emit('toggleSourceTier', $event)"
         />
       </div>
     </div>
@@ -43,6 +44,6 @@ export default {
     sources: { type: Array, required: true },
     refreshingIds: { type: Array, default: () => [] }
   },
-  emits: ['openAddModal', 'refreshSource', 'deleteSource', 'toggleSharedSource']
+  emits: ['openAddModal', 'refreshSource', 'deleteSource', 'toggleSharedSource', 'toggleSourceTier']
 };
 </script>

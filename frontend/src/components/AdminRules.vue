@@ -89,7 +89,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- 强制直连域名 -->
         <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-750/30 flex flex-col">
           <div class="flex items-center justify-between mb-1.5">
@@ -100,22 +100,45 @@
             <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">最高直连优先级</span>
           </div>
           <p class="text-[11px] text-slate-400 mb-2 leading-tight">每行一个域名或通配符（支持 +.domain.com），绕过代理直连。</p>
-          <textarea v-model="rules.admin_direct_domains" rows="8" placeholder="ying-qing.cn&#10;+.corp.internal&#10;192.168.0.0/16" 
+          <textarea v-model="rules.admin_direct_domains" rows="7" placeholder="ying-qing.cn&#10;+.corp.internal&#10;192.168.0.0/16" 
                     class="w-full flex-1 p-3 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none leading-relaxed"></textarea>
         </div>
 
-        <!-- 强制代理域名 -->
+        <!-- 强制普通代理域名 -->
         <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-750/30 flex flex-col">
           <div class="flex items-center justify-between mb-1.5">
             <label class="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
               <i class="fa-solid fa-paper-plane text-sky-500"></i>
-              <span>强制代理域名</span>
+              <span>强制普通代理域名（走主出站）</span>
             </label>
-            <span class="text-[10px] text-sky-600 dark:text-sky-400 font-medium">在直连之后生效</span>
+            <span class="text-[10px] text-sky-600 dark:text-sky-400 font-medium">可覆盖内置高级规则</span>
           </div>
-          <p class="text-[11px] text-slate-400 mb-2 leading-tight">每行一个域名或通配符，强制调度至代理策略组出站。</p>
-          <textarea v-model="rules.admin_proxy_domains" rows="8" placeholder="google.com&#10;+.github.com&#10;openai.com" 
+          <p class="text-[11px] text-slate-400 mb-2 leading-tight">每行一个域名，强制走便宜普通「主出站」（也可用来把内置高级域名踢回普通线路）。</p>
+          <textarea v-model="rules.admin_proxy_domains" rows="7" placeholder="google.com&#10;+.github.com&#10;youtube.com" 
                     class="w-full flex-1 p-3 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none leading-relaxed"></textarea>
+        </div>
+
+        <!-- 精选高级域名 -->
+        <div class="p-4 rounded-xl border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/40 dark:bg-amber-950/20 flex flex-col space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <i class="fa-solid fa-star text-amber-500"></i>
+              <span>追加精选高级域名（走「精选高级」组）</span>
+            </label>
+            <span class="text-[10px] text-amber-700 dark:text-amber-400 font-medium">实时热追加</span>
+          </div>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">每行或逗号填一个域名后缀，出现新 AI/高风控服务时直接填这里，无需改代码。</p>
+          <textarea v-model="rules.admin_premium_domains" rows="6" placeholder="sora.com&#10;manus.im&#10;example-ai.google" 
+                    class="w-full flex-1 p-3 text-xs font-mono rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none leading-relaxed"></textarea>
+          <div v-if="defaultPremiumDomains.length" class="text-[11px]">
+            <button type="button" @click="showDefaultPremium = !showDefaultPremium" class="text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer">
+              <i class="fa-solid text-[10px]" :class="showDefaultPremium ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              <span>查看系统内置默认精选高级域名（共 {{ defaultPremiumDomains.length }} 个）</span>
+            </button>
+            <div v-if="showDefaultPremium" class="mt-1.5 p-2 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-amber-200/60 dark:border-amber-800/40 font-mono text-[10px] text-slate-600 dark:text-slate-300 max-h-24 overflow-y-auto leading-relaxed">
+              {{ defaultPremiumDomains.join(', ') }}
+            </div>
+          </div>
         </div>
 
         <!-- 管理员 Clash 规则 -->
@@ -127,8 +150,8 @@
             </label>
             <span class="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium">支持占位符</span>
           </div>
-          <p class="text-[11px] text-slate-400 mb-2 leading-tight">每行一条 Clash 规则，__MAIN_PROXY__ 自动替换为主力组。</p>
-          <textarea v-model="rules.admin_rules" rows="8" placeholder="DOMAIN-SUFFIX,example.com,__MAIN_PROXY__&#10;IP-CIDR,10.0.0.0/8,DIRECT" 
+          <p class="text-[11px] text-slate-400 mb-2 leading-tight">每行一条 Clash 规则，<code>__MAIN_PROXY__</code> 替换为主出站，<code>__PREMIUM_PROXY__</code> 替换为「精选高级」。</p>
+          <textarea v-model="rules.admin_rules" rows="7" placeholder="DOMAIN-SUFFIX,example.com,__MAIN_PROXY__&#10;DOMAIN-SUFFIX,special-ai.com,__PREMIUM_PROXY__&#10;IP-CIDR,10.0.0.0/8,DIRECT" 
                     class="w-full flex-1 p-3 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none leading-relaxed"></textarea>
         </div>
       </div>
@@ -155,8 +178,11 @@ export default {
     const rules = reactive({
       admin_direct_domains: '',
       admin_proxy_domains: '',
+      admin_premium_domains: '',
       admin_rules: ''
     });
+    const defaultPremiumDomains = ref([]);
+    const showDefaultPremium = ref(false);
 
     const settings = reactive({
       default_target: 'clash',
@@ -183,7 +209,12 @@ export default {
           message.value = '无法读取管理员规则';
           return;
         }
-        Object.assign(rules, await response.json());
+        const rulesData = await response.json();
+        rules.admin_direct_domains = rulesData.admin_direct_domains || '';
+        rules.admin_proxy_domains = rulesData.admin_proxy_domains || '';
+        rules.admin_premium_domains = rulesData.admin_premium_domains || '';
+        rules.admin_rules = rulesData.admin_rules || '';
+        defaultPremiumDomains.value = Array.isArray(rulesData.default_premium_domains) ? rulesData.default_premium_domains : [];
 
         const settingsResponse = await fetch('/api/admin/settings');
         if (settingsResponse.ok) {
@@ -249,6 +280,8 @@ export default {
 
     return {
       rules,
+      defaultPremiumDomains,
+      showDefaultPremium,
       settings,
       loading,
       saving,

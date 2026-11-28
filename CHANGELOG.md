@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-28
+
+### Added
+- **Explicit Source Tiering (`standard` / `premium`)**: Added a persistent `tier` field on `Source` so administrators and users can explicitly mark high-cost/clean-IP sources (`精选高级`) instead of relying on keyword heuristics.
+- **Dedicated `精选高级` & `GLOBAL` Routing**: Added a top-level `精选高级` Clash selector (`PREMIUM` in Sing-box) backed by `[动态·精选高级] ⭐ 精选高级主备`, plus an explicit `GLOBAL` selector defaulting to `[7897] 主出站` to prevent accidental premium traffic burn in global mode.
+- **Shared-Source User Whitelist ACL**: Added `share_scope` (`all` / `selected`) and `source_user_grants` across source listing, node pool, latency ping, user toggles, and all subscription export targets (`/c/{token}`).
+- **Configurable Premium Domains & Admin UI**: Added `admin_premium_domains` in global rules (with collapsible built-in AI domains), whitelist user selection and `local_yaml` content input in `AdminSources`, and homepage private-source tier switching.
+
+### Changed
+- **Eliminated Keyword-Based Residential Guessing**: `sync_single_source` now derives node premium status solely from `Source.tier` rather than node-name or hostname heuristics.
+- **Isolated Standard Outbounds**: `[7897] 主出站`, `[7898] 副出站`, regional `url-test` groups, and `[动态·全局] 🌐 日常全网优选` exclude `premium` nodes (falling back only when an account has zero standard nodes); AI and high-risk domains route to `精选高级` while general Google services and `MATCH` stay on `[7897] 主出站`.
+
+### Fixed
+- **Admin Rule Settings Loading**: Fixed `get_system_settings()` to retain `admin_direct_domains`, `admin_proxy_domains`, `admin_premium_domains`, and `admin_rules` persisted in `settings`.
+- **Custom Rules Hint**: Updated custom rule placeholders to reference `__MAIN_PROXY__` and `__PREMIUM_PROXY__`.
+
+### Upgrade
+- Back up the database before upgrading; startup idempotently adds `tier` and `share_scope` columns on `sources`, creates `source_user_grants`, and initializes existing sources containing residential nodes to `tier='premium'` once.
+
 ## [0.6.4] - 2026-11-26
 
 ### Security

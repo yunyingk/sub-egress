@@ -73,7 +73,7 @@
               <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 聚合动态策略组 (Dynamic Strategy Groups · 共 {{ dynamicGroups.length }} 组)
               </h4>
-              <span class="text-[11px] text-slate-400 font-mono hidden sm:inline">自动计算置顶于客户端 PROXY 主选择器</span>
+              <span class="text-[11px] text-slate-400 font-mono hidden sm:inline">普通日常与精选高级严格隔离调度</span>
             </div>
             <span v-if="selectedGroup" 
                   @click="selectedGroup = null" 
@@ -211,8 +211,8 @@
                           :class="node.node_type === 'ss' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : (node.node_type === 'vless' ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300')">
                       {{ node.node_type }}
                     </span>
-                    <span v-if="node.is_residential" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold text-[10px]">
-                      住宅 IP
+                    <span v-if="node.source_tier === 'premium' || node.is_residential" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold text-[10px]">
+                      精选高级
                     </span>
                     <span class="text-slate-400 dark:text-slate-500 truncate max-w-[120px]">{{ node.source_name }}</span>
                   </div>

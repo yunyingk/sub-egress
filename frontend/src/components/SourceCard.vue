@@ -7,7 +7,11 @@
             <span class="font-bold text-slate-900 dark:text-white text-base">{{ source.name }}</span>
             <span v-if="source.is_shared" 
                   class="px-2 py-0.5 text-xs rounded bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-mono font-medium flex items-center gap-1">
-              <i class="fa-solid fa-globe text-[10px]"></i> 平台共享
+              <i class="fa-solid fa-globe text-[10px]"></i> {{ source.share_scope === 'selected' ? '白名单共享' : '平台共享' }}
+            </span>
+            <span v-if="source.tier === 'premium'"
+                  class="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800 font-semibold flex items-center gap-1">
+              <i class="fa-solid fa-star text-[10px]"></i> 精选高级
             </span>
             <span v-if="source.is_shared && source.is_enabled_for_user === false"
                   class="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700 font-mono font-medium">
@@ -44,8 +48,16 @@
             </div>
           </template>
 
-          <!-- 个人私有源：提供专属刷新与删除按钮 -->
+          <!-- 个人私有源：提供等级切换、专属刷新与删除按钮 -->
           <template v-else>
+            <button @click="$emit('toggleTier', source)"
+                    type="button"
+                    :class="source.tier === 'premium' ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'"
+                    class="px-2.5 py-1 text-xs font-medium rounded-lg border transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                    :title="source.tier === 'premium' ? '当前为精选高级（点击切换为普通日常）' : '当前为普通日常（点击切换为精选高级）'">
+              <i class="fa-solid text-[11px]" :class="source.tier === 'premium' ? 'fa-star text-amber-500' : 'fa-layer-group text-slate-400'"></i>
+              <span>{{ source.tier === 'premium' ? '精选高级' : '普通日常' }}</span>
+            </button>
             <button @click="$emit('refresh', source.id)" 
                     :disabled="refreshing"
                     title="刷新此私有源" 
@@ -103,7 +115,7 @@ export default {
     source: { type: Object, required: true },
     refreshing: { type: Boolean, default: false }
   },
-  emits: ['refresh', 'delete', 'toggleShared'],
+  emits: ['refresh', 'delete', 'toggleShared', 'toggleTier'],
   setup(props) {
     const formatRemaining = (src) => {
       if (src.remaining_text) return src.remaining_text;
